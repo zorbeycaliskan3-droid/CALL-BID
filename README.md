@@ -5,6 +5,8 @@ Read-only: no broker connection, no order placement, no network calls.
 
 ## Run
 
+python -m streamlit run C:\Users\zorbey.caliskan\fxvol_dashboard\app.py
+
 ```
 pip install -r requirements.txt
 streamlit run app.py
