@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/store/
+!data/store/.gitkeep
+data/incoming/*.csv
+!data/incoming/.gitkeep

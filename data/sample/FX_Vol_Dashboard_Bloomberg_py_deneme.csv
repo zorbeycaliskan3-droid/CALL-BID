@@ -1,0 +1,8 @@
+﻿MACHINE-READABLE SNAPSHOT;;;;;;;;;;;;;;;;;;;;;
+Save this sheet as CSV each morning, one file per day, then append in Python. Do not reformat: the column names are the contract with the parser.;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;
+date;pair;spot;iv_on;iv_1w;iv_1m;iv_3m;rv_30;rr25_1m;bf25_1m;iv_minus_rv;iv_1m_pctile;rv_pctile;rr_pctile;rr_zscore;rr_chg_5d;sigma_daily_pct;sigma_daily_pips;exp_abs_move_pips;stop_0p7sig;stop_1p0sig;stop_1p5sig
+2026-09-17;EURUSD;1,1536;6,23;4,645;4,775;5,4;4,618;-0,2125;0,1325;0,157;0,034351145;0,332061069;0,450381679;-0,198151155;-0,12;0,392453111;45,2733909;36,12293962;31,69137363;45,2733909;67,91008635
+;;;;;;;;;;;;;;;;;;;;;
+For a one-off backfill instead of daily appends:;;;;;;;;;;;;;;;;;;;;;
+copy the two columns of any History block straight out to CSV - they are already date,value pairs.;;;;;;;;;;;;;;;;;;;;;
