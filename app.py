@@ -83,6 +83,34 @@ for check in problems:
 pset = percentile_set(history, row, int(window))
 st.caption(f"Percentile source: {pset.source}")
 
+with st.expander("What the terms mean"):
+    st.markdown(
+        """
+**Percent points** — the unit of every volatility number here. `6.23` means
+6.23%, an annualised standard deviation of returns. Not 0.0623. The whole app
+divides by 100 exactly once, where the formula needs a fraction.
+
+**Vol points** — the unit of a *difference* between two vols. `iv_minus_rv` of
++0.16 means implied sits 0.16 percentage points above realised. Risk reversal
+and butterfly are quoted in the same unit: they are vol spreads, not vols.
+
+**Positioning skew** — where the options market is paying up for protection.
+The 25-delta risk reversal is (call vol − put vol) at equal distance either side
+of spot. Negative means puts cost more than calls: the market is paying for
+downside. It measures *positioning*, what people have already paid for, not
+where price will go. It is not a forecast and not an entry trigger.
+
+**History** — the snapshots you have accumulated locally, one row per day per
+pair. It drives the time-series charts and, once 60 rows are stored, the
+percentiles and z-score. Below 60 rows the Bloomberg figures from Excel are used
+instead, because a percentile over a handful of days means nothing.
+
+**Why ATM vol never sets direction** — implied volatility is symmetric by
+construction. It prices the *size* of the expected move and says nothing about
+its sign. Only the risk reversal is directional.
+        """
+    )
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Spot", f"{row['spot']:.{decimals}f}")
 c2.metric("1M ATM vol", f"{row['iv_1m']:.2f}", f"{pset.iv_1m_pctile:.0%} pctile", delta_color="off")
@@ -97,17 +125,39 @@ st.markdown(
 )
 
 st.subheader("Today's range")
-sigma_pips = sigma_daily_pips(float(row["spot"]), float(row["iv_on"]), pip_size)
-low, high = sigma_price_levels(float(row["spot"]), sigma_pips, pip_size)
+snapshot_spot = float(row["spot"])
+current_spot = st.number_input(
+    "Current spot (range is centred here)",
+    value=snapshot_spot,
+    min_value=0.0,
+    step=float(pip_size) * 10,
+    format=f"%.{decimals}f",
+)
+sigma_pips = sigma_daily_pips(current_spot, float(row["iv_on"]), pip_size)
+low, high = sigma_price_levels(current_spot, sigma_pips, pip_size)
+drift_pips = (current_spot - snapshot_spot) / pip_size
+st.caption(
+    f"Snapshot mid was {snapshot_spot:.{decimals}f}; current spot is "
+    f"{drift_pips:+.1f} pips from it. Levels below are built off current spot."
+)
 r1, r2, r3 = st.columns(3)
 r1.metric("Expected absolute move", f"{expected_abs_move_pips(sigma_pips):.1f} pips")
 r2.metric("1σ low", f"{low:.{decimals}f}")
 r3.metric("1σ high", f"{high:.{decimals}f}")
 st.table(
     pd.DataFrame(
-        {"Stop (pips)": [f"{m * sigma_pips:.1f}" for m in (0.7, 1.0, 1.5)]},
+        {
+            "Stop (pips)": [f"{m * sigma_pips:.1f}" for m in (0.7, 1.0, 1.5)],
+            "Long stop": [f"{current_spot - m * sigma_pips * pip_size:.{decimals}f}" for m in (0.7, 1.0, 1.5)],
+            "Short stop": [f"{current_spot + m * sigma_pips * pip_size:.{decimals}f}" for m in (0.7, 1.0, 1.5)],
+        },
         index=["0.7 sigma", "1.0 sigma", "1.5 sigma"],
     )
+)
+st.caption(
+    "One sigma is the move the option market implies for a single session, about "
+    "a 2-in-3 chance of staying inside. The expected absolute move is the average "
+    "size of the day's move, which is smaller than one sigma because big days are rare."
 )
 
 st.subheader("Position sizing")
@@ -123,11 +173,35 @@ inverted, note = term_structure_note(row)
 fig = go.Figure(go.Scatter(x=TENORS, y=[float(row[t]) for t in TENORS], mode="lines+markers"))
 fig.update_layout(height=300, margin=dict(t=10, b=10), yaxis_title="ATM vol (percent points)")
 st.plotly_chart(fig, use_container_width=True)
+curve = {t: float(row[t]) for t in TENORS}
+st.caption(
+    f"**What this shows.** The cost of volatility at four horizons: overnight "
+    f"{curve['iv_on']:.2f}, 1 week {curve['iv_1w']:.2f}, 1 month {curve['iv_1m']:.2f}, "
+    f"3 months {curve['iv_3m']:.2f} percent points. Normally the line rises to the "
+    "right — more time, more that can happen. "
+    + (
+        "**Here it does not.** A short tenor sits above a longer one, so the market is "
+        "paying extra for the next few sessions specifically: a data release, a central "
+        "bank, an event with a date on it. Expect a wider day than the 1M vol suggests, "
+        "and size down accordingly."
+        if inverted
+        else "**Here it does.** No dated event is being priced into the front end; today "
+        "should behave like an ordinary session."
+    )
+)
 
 st.subheader("Positioning skew")
 lean = directional_lean(pset.rr_zscore, pset.rr_pctile, float(row["rr_chg_5d"]))
 st.metric(lean.direction, f"score {lean.score:+.2f}")
 st.caption(lean.detail)
+st.caption(
+    f"**How to read it.** The score runs −1 to +1. It is built only from the 25-delta "
+    f"risk reversal: 35% from where the skew sits today (its z-score and percentile) and "
+    f"65% from how far it has moved in five days. Beyond ±0.20 it is called a lean, "
+    f"otherwise neutral. Today: {row['rr25_1m']:+.4f} vol points, "
+    f"{'puts bid over calls' if float(row['rr25_1m']) < 0 else 'calls bid over puts'}, "
+    f"having moved {float(row['rr_chg_5d']):+.3f} in the last week."
+)
 st.caption(
     "Risk-reversal positioning skew only. ATM implied vol carries no directional "
     "information and feeds nothing here. One input among several — not an entry signal."
@@ -142,6 +216,15 @@ else:
     iv_rv.add_scatter(x=history["date"], y=history["rv_30"], name="RV 30d", mode="lines")
     iv_rv.update_layout(height=320, margin=dict(t=10, b=10), yaxis_title="percent points")
     st.plotly_chart(iv_rv, use_container_width=True)
+    st.caption(
+        "**What this shows.** What the option market charges for the next month (IV) "
+        "against what the pair actually delivered over the last thirty days (RV), both "
+        "in percent points. When IV sits above RV the market is charging for movement "
+        "that has not been happening — the setup for chop, and a poor time to pay for "
+        "a breakout. When IV drops below RV the pair is moving more than it costs to "
+        "own that movement, which is when trends tend to run. The gap between the two "
+        "lines is the `IV − RV` metric at the top of the page."
+    )
 
     rr = history["rr25_1m"]
     mean, sd = float(rr.mean()), float(rr.std(ddof=1) or 0.0)
@@ -152,6 +235,16 @@ else:
             rr_fig.add_hline(y=mean + sign * mult * sd, line_dash=dash, line_color="#888")
     rr_fig.update_layout(height=320, margin=dict(t=10, b=10), yaxis_title="vol points")
     st.plotly_chart(rr_fig, use_container_width=True)
+    st.caption(
+        f"**What this shows.** The 25-delta risk reversal over time, in vol points, with "
+        f"its own mean ({mean:+.3f}) and the ±1σ dotted / ±2σ dashed bands around it. "
+        "Below zero means puts are bid over calls — the market is paying for downside. "
+        "The **level** tells you how crowded that positioning already is; the **slope** "
+        "tells you whether it is being put on or taken off, and the slope is what the "
+        "skew score weights most heavily. A line pushing past ±2σ is crowded and prone "
+        "to snapping back; a line travelling *away* from an extreme is positioning "
+        "unwinding, which is the more tradeable of the two."
+    )
 
 st.subheader("Stored snapshots")
 st.dataframe(store, use_container_width=True)
