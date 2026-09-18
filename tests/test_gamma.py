@@ -162,3 +162,23 @@ def test_excel_dialect_chain_with_extra_columns_and_title_rows(tmp_path):
     assert parsed["strike"].tolist() == [420.0, 400.0]
     assert parsed["iv"].tolist() == [15.5, 17.25]
     assert "option_ticker" not in parsed.columns or parsed["strike"].notna().all()
+
+
+COMBINED = Path(__file__).resolve().parents[1] / "data" / "sample" / "combined_export_sample.csv"
+
+
+def test_combined_export_chain_block_parses():
+    parsed = parse_chain(COMBINED)
+    assert len(parsed) == 46
+    assert set(parsed["option_type"]) == {"C", "P"}
+    assert parsed["strike"].min() == pytest.approx(1.10)
+    assert parsed["strike"].max() == pytest.approx(1.21)
+
+
+def test_gamma_on_a_futures_chain_with_a_large_multiplier():
+    parsed = parse_chain(COMBINED)
+    profile = gamma_exposure(parsed, 1.1540, contract_size=125000)
+    levels = key_levels(profile, 1.1540)
+    assert levels.call_wall == pytest.approx(1.165)
+    assert levels.put_wall == pytest.approx(1.145)
+    assert levels.call_wall > levels.put_wall

@@ -9,7 +9,9 @@ NUMERIC_COLUMNS: list[str] = [
 ]
 
 # Added after the first release; absent from older exports and parsed as NaN.
-OPTIONAL_COLUMNS: list[str] = ["bid", "ask", "range_basis_price"]
+OPTIONAL_COLUMNS: list[str] = [
+    "bid", "ask", "range_basis_price", "chain_spot", "chain_multiplier",
+]
 NUMERIC_COLUMNS += OPTIONAL_COLUMNS
 
 COLUMNS: list[str] = ["date", "pair"] + NUMERIC_COLUMNS

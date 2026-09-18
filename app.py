@@ -8,7 +8,7 @@ import streamlit as st
 
 from fxvol.config import TENORS, Paths, pip_size_for, price_decimals
 from fxvol.gamma import gamma_exposure, key_levels, top_levels
-from fxvol.io import load_store, parse_chain, parse_snapshot, rebuild_store
+from fxvol.io import has_chain_block, load_store, parse_chain, parse_snapshot, rebuild_store
 from fxvol.signals import (
     directional_lean,
     follow_through,
@@ -50,6 +50,15 @@ if uploads:
             continue
         dates = ", ".join(f"{d:%Y-%m-%d}" for d in parsed["date"])
         st.sidebar.success(f"{upload.name}: {len(parsed)} row(s) — {dates}")
+
+        if has_chain_block(target):
+            try:
+                embedded = parse_chain(target)
+            except ValueError as error:
+                st.sidebar.warning(f"{upload.name}: chain block unreadable — {error}")
+            else:
+                (paths.root / "data" / "chain.csv").write_bytes(target.read_bytes())
+                st.sidebar.success(f"{upload.name}: chain block with {len(embedded):,} contracts")
 
 store = rebuild_store(paths)
 if store.empty:
@@ -281,45 +290,60 @@ chain_file = st.file_uploader(
     type="csv",
     key="chain",
 )
-if chain_file is None:
+chain_path = paths.root / "data" / "chain.csv"
+if chain_file is None and not chain_path.exists():
     st.info(
         "No option chain loaded. The volatility snapshot has no strike dimension, so "
-        "gamma exposure needs a separate chain export — one row per strike per side, "
-        "with open interest and implied vol. A sample is in `data/sample/`."
+        "gamma exposure needs chain rows — one per strike per side, with open interest "
+        "and implied vol. The Export sheet now carries them beneath the snapshot, so a "
+        "combined CSV uploaded in the sidebar feeds this section automatically."
     )
 else:
-    chain_path = paths.root / "data" / "chain.csv"
-    chain_path.write_bytes(chain_file.getvalue())
+    if chain_file is not None:
+        chain_path.write_bytes(chain_file.getvalue())
+    else:
+        st.caption("Using the chain block from the most recent snapshot upload.")
     try:
         chain = parse_chain(chain_path)
     except ValueError as error:
-        st.error(f"{chain_file.name}: {error}")
+        st.error(f"Chain: {error}")
         chain = None
 
     if chain is not None and not chain.empty:
+        chain_spot = row.get("chain_spot", float("nan"))
+        chain_mult = row.get("chain_multiplier", float("nan"))
+        default_spot = float(chain_spot) if not pd.isna(chain_spot) else float(chain["strike"].median())
+        default_mult = int(chain_mult) if not pd.isna(chain_mult) else 100
+        if not pd.isna(chain_spot):
+            st.caption(
+                f"Underlying price and multiplier came from the snapshot's chain_spot "
+                f"and chain_multiplier columns."
+            )
+
         g1, g2 = st.columns([1, 1])
         gex_spot = g1.number_input(
             "Underlying price for the gamma calculation",
-            value=float(chain["strike"].median()),
+            value=default_spot,
             min_value=0.0001,
             format="%.4f",
             key="gex_spot",
         )
         contract_size = g2.number_input(
-            "Contract multiplier", value=100, min_value=1, step=1, key="contract_size"
+            "Contract multiplier", value=default_mult, min_value=1, step=1, key="contract_size"
         )
 
         profile = gamma_exposure(chain, gex_spot, int(contract_size))
         levels = key_levels(profile, gex_spot)
 
+        gd = 4 if gex_spot < 10 else 2
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Call wall (resistance)", f"{levels.call_wall:,.2f}")
-        k2.metric("Put wall (support)", f"{levels.put_wall:,.2f}")
-        k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.2f}")
+        k1.metric("Call wall (resistance)", f"{levels.call_wall:,.{gd}f}")
+        k2.metric("Put wall (support)", f"{levels.put_wall:,.{gd}f}")
+        k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.{gd}f}")
         k4.metric("Net gamma", f"{levels.total_gex / 1e6:,.0f}M")
         (st.success if levels.total_gex > 0 else st.warning)(f"**{levels.regime}.** {levels.note}")
         st.caption(f"Underlying {gex_spot:,.4f} · {len(chain):,} contracts · "
-                   f"{len(profile):,} strikes from {profile['strike'].min():,.2f} to {profile['strike'].max():,.2f}")
+                   f"{len(profile):,} strikes from {profile['strike'].min():,.{gd}f} to {profile['strike'].max():,.{gd}f}")
 
         colors = ["#2f6fdb" if v >= 0 else "#c0392b" for v in profile["total_gex"]]
         gex_fig = go.Figure(

@@ -76,6 +76,20 @@ def parse_snapshot(path: Path | str) -> pd.DataFrame:
 CHAIN_NUMERIC: list[str] = ["strike", "open_interest", "iv", "days_to_expiry"]
 
 
+def has_chain_block(path: Path | str) -> bool:
+    """True when the file carries an option-chain header alongside anything else.
+
+    The combined export writes the daily snapshot and the chain into one CSV;
+    each parser finds its own header and ignores the other block.
+    """
+    for line in _read_text(Path(path)):
+        for delimiter in (";", ",", "\t", "|"):
+            fields = [f.strip().strip('"').lower() for f in line.split(delimiter)]
+            if "strike" in fields and "option_type" in fields:
+                return True
+    return False
+
+
 def parse_chain(path: Path | str) -> pd.DataFrame:
     """Parse an option-chain export for the gamma exposure view.
 

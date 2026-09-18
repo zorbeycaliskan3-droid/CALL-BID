@@ -134,3 +134,29 @@ def test_older_exports_without_bid_ask_still_parse():
     assert pd.isna(row["bid"])
     assert pd.isna(row["ask"])
     assert pd.isna(row["range_basis_price"])
+
+
+COMBINED = ROOT / "data" / "sample" / "combined_export_sample.csv"
+
+
+def test_combined_export_yields_one_snapshot_row():
+    frame = parse_snapshot(COMBINED)
+    assert len(frame) == 1
+    row = frame.iloc[0]
+    assert row["pair"] == "EURUSD"
+    assert row["spot"] == pytest.approx(1.1536)
+    assert row["chain_spot"] == pytest.approx(1.1540)
+    assert row["chain_multiplier"] == pytest.approx(125000)
+
+
+def test_combined_export_chain_rows_are_not_read_as_snapshots():
+    frame = parse_snapshot(COMBINED)
+    assert len(frame) == 1
+    assert frame["date"].notna().all()
+
+
+def test_has_chain_block_detects_the_second_header():
+    from fxvol.io import has_chain_block
+
+    assert has_chain_block(COMBINED) is True
+    assert has_chain_block(SAMPLE) is False

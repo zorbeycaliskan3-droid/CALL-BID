@@ -1,0 +1,57 @@
+﻿MACHINE-READABLE SNAPSHOT;;;;;;;;;;;;;;;;;;;;;
+Save this sheet as CSV each morning, one file per day, then append in Python. Do not reformat: the column names are the contract with the parser.;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;
+date;pair;spot;iv_on;iv_1w;iv_1m;iv_3m;rv_30;rr25_1m;bf25_1m;iv_minus_rv;iv_1m_pctile;rv_pctile;rr_pctile;rr_zscore;rr_chg_5d;sigma_daily_pct;sigma_daily_pips;exp_abs_move_pips;stop_0p7sig;stop_1p0sig;stop_1p5sig;bid;ask;range_basis_price;chain_spot;chain_multiplier
+2026-09-17;EURUSD;1,1536;6,23;4,645;4,775;5,4;4,618;-0,2125;0,1325;0,157;0,034351145;0,332061069;0,450381679;-0,198151155;-0,12;0,392453111;45,2733909;36,12293962;31,69137363;45,2733909;67,91008635;1,1535;1,1537;1,1535;1,1540;125000
+;;;;;;;;;;;;;;;;;;;;;
+For a one-off backfill instead of daily appends:;;;;;;;;;;;;;;;;;;;;;
+copy the two columns of any History block straight out to CSV - they are already date,value pairs.;;;;;;;;;;;;;;;;;;;;;
+
+OPTION CHAIN BLOCK  (mirrors the Chain tab);;;;;
+option_ticker;strike;option_type;open_interest;iv;days_to_expiry
+ECZ6C 1.100 Comdty;1,100;C;28;7,86;30
+ECZ6P 1.100 Comdty;1,100;P;44;8,26;30
+ECZ6C 1.105 Comdty;1,105;C;75;8,16;30
+ECZ6P 1.105 Comdty;1,105;P;98;8,15;30
+ECZ6C 1.110 Comdty;1,110;C;271;8,69;30
+ECZ6P 1.110 Comdty;1,110;P;222;7,95;30
+ECZ6C 1.115 Comdty;1,115;C;496;7,72;30
+ECZ6P 1.115 Comdty;1,115;P;591;7,77;30
+ECZ6C 1.120 Comdty;1,120;C;894;7,63;30
+ECZ6P 1.120 Comdty;1,120;P;1148;7,64;30
+ECZ6C 1.125 Comdty;1,125;C;1300;7,81;30
+ECZ6P 1.125 Comdty;1,125;P;1631;7,40;30
+ECZ6C 1.130 Comdty;1,130;C;3769;7,44;30
+ECZ6P 1.130 Comdty;1,130;P;2999;7,28;30
+ECZ6C 1.135 Comdty;1,135;C;3282;7,36;30
+ECZ6P 1.135 Comdty;1,135;P;4225;6,97;30
+ECZ6C 1.140 Comdty;1,140;C;6829;7,16;30
+ECZ6P 1.140 Comdty;1,140;P;5134;7,00;30
+ECZ6C 1.145 Comdty;1,145;C;6794;6,25;30
+ECZ6P 1.145 Comdty;1,145;P;26280;6,62;30
+ECZ6C 1.150 Comdty;1,150;C;10462;6,69;30
+ECZ6P 1.150 Comdty;1,150;P;9691;6,55;30
+ECZ6C 1.155 Comdty;1,155;C;8598;6,54;30
+ECZ6P 1.155 Comdty;1,155;P;11023;6,82;30
+ECZ6C 1.160 Comdty;1,160;C;10177;6,75;30
+ECZ6P 1.160 Comdty;1,160;P;8309;6,67;30
+ECZ6C 1.165 Comdty;1,165;C;24072;7,00;30
+ECZ6P 1.165 Comdty;1,165;P;8768;6,84;30
+ECZ6C 1.170 Comdty;1,170;C;5772;7,10;30
+ECZ6P 1.170 Comdty;1,170;P;5942;7,19;30
+ECZ6C 1.175 Comdty;1,175;C;3178;6,90;30
+ECZ6P 1.175 Comdty;1,175;P;4527;7,04;30
+ECZ6C 1.180 Comdty;1,180;C;3169;6,99;30
+ECZ6P 1.180 Comdty;1,180;P;3062;7,54;30
+ECZ6C 1.185 Comdty;1,185;C;1894;7,14;30
+ECZ6P 1.185 Comdty;1,185;P;1736;7,64;30
+ECZ6C 1.190 Comdty;1,190;C;578;8,07;30
+ECZ6P 1.190 Comdty;1,190;P;593;7,82;30
+ECZ6C 1.195 Comdty;1,195;C;317;8,20;30
+ECZ6P 1.195 Comdty;1,195;P;297;7,85;30
+ECZ6C 1.200 Comdty;1,200;C;168;8,43;30
+ECZ6P 1.200 Comdty;1,200;P;216;8,25;30
+ECZ6C 1.205 Comdty;1,205;C;56;8,34;30
+ECZ6P 1.205 Comdty;1,205;P;76;8,11;30
+ECZ6C 1.210 Comdty;1,210;C;27;8,72;30
+ECZ6P 1.210 Comdty;1,210;P;26;8,32;30
