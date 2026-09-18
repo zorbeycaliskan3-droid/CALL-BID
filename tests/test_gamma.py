@@ -133,3 +133,32 @@ def test_chain_without_a_strike_column_raises(tmp_path):
     path.write_text("a,b\n1,2\n", encoding="utf-8")
     with pytest.raises(ValueError):
         parse_chain(path)
+
+
+def test_flat_gamma_when_calls_and_puts_cancel():
+    profile = gamma_exposure(
+        chain([(100.0, "C", 1000, 20.0, 30), (100.0, "P", 1000, 20.0, 30)]), 100.0
+    )
+    assert key_levels(profile, 100.0).regime == "Flat gamma"
+
+
+def test_excel_dialect_chain_with_extra_columns_and_title_rows(tmp_path):
+    lines = [
+        "OPTION CHAIN FOR GAMMA EXPOSURE;;;;;",
+        "Save this sheet as CSV and upload it.;;;;;",
+        ";;;;;",
+        "Underlying ticker (input);SPY US Equity;;;;",
+        "option_ticker;strike;option_type;open_interest;iv;days_to_expiry",
+        "SPY US 12/19/26 C420 Equity;420,0;Call;12000;15,50;30",
+        "SPY US 12/19/26 P400 Equity;400,0;Put;9000;17,25;30",
+        ";;;;;",
+    ]
+    path = tmp_path / "chain.csv"
+    path.write_text("\n".join(lines), encoding="utf-8-sig")
+
+    parsed = parse_chain(path)
+    assert len(parsed) == 2
+    assert list(parsed["option_type"]) == ["C", "P"]
+    assert parsed["strike"].tolist() == [420.0, 400.0]
+    assert parsed["iv"].tolist() == [15.5, 17.25]
+    assert "option_ticker" not in parsed.columns or parsed["strike"].notna().all()

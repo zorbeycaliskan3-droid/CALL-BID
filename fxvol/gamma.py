@@ -124,7 +124,10 @@ def key_levels(profile: pd.DataFrame, spot: float) -> Levels:
     flip = gamma_flip(profile)
     total = float(profile["total_gex"].sum())
 
-    if total > 0:
+    if total == 0:
+        regime = "Flat gamma"
+        note = "Call and put gamma cancel out. No hedging pressure either way."
+    elif total > 0:
         regime = "Long gamma"
         note = (
             "Dealers are net long gamma. Their hedging sells rallies and buys dips, "

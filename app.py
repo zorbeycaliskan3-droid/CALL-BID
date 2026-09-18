@@ -318,6 +318,8 @@ else:
         k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.2f}")
         k4.metric("Net gamma", f"{levels.total_gex / 1e6:,.0f}M")
         (st.success if levels.total_gex > 0 else st.warning)(f"**{levels.regime}.** {levels.note}")
+        st.caption(f"Underlying {gex_spot:,.4f} · {len(chain):,} contracts · "
+                   f"{len(profile):,} strikes from {profile['strike'].min():,.2f} to {profile['strike'].max():,.2f}")
 
         colors = ["#2f6fdb" if v >= 0 else "#c0392b" for v in profile["total_gex"]]
         gex_fig = go.Figure(
