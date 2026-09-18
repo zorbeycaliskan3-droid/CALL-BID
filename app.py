@@ -14,6 +14,7 @@ from fxvol.signals import (
     percentile_set,
     position_size_lots,
     regime,
+    skew_headline,
     stop_verdict,
     term_structure_note,
 )
@@ -81,6 +82,18 @@ for check in problems:
     )
 
 pset = percentile_set(history, row, int(window))
+lean = directional_lean(pset.rr_zscore, pset.rr_pctile, float(row["rr_chg_5d"]))
+headline = skew_headline(pair, float(row["rr25_1m"]), lean)
+st.markdown(
+    f"<div style='padding:16px 20px;border-radius:6px;border-left:6px solid "
+    f"{TONE_COLOR[headline.tone]};background:rgba(128,128,128,0.10)'>"
+    f"<div style='font-size:1.45rem;font-weight:700'>{headline.quote_side}</div>"
+    f"<div style='font-size:1.05rem;margin-top:2px'>{headline.bias}</div>"
+    f"<div style='opacity:0.7;margin-top:6px'>Skew score {lean.score:+.2f} · "
+    f"25d RR {row['rr25_1m']:+.4f} vol pts · 5d change {row['rr_chg_5d']:+.3f} · "
+    f"positioning, not a forecast</div></div>",
+    unsafe_allow_html=True,
+)
 st.caption(f"Percentile source: {pset.source}")
 
 with st.expander("What the terms mean"):
@@ -207,8 +220,7 @@ st.caption(
 )
 
 st.subheader("Positioning skew")
-lean = directional_lean(pset.rr_zscore, pset.rr_pctile, float(row["rr_chg_5d"]))
-st.metric(lean.direction, f"score {lean.score:+.2f}")
+st.metric(headline.quote_side, f"score {lean.score:+.2f}", headline.bias, delta_color="off")
 st.caption(lean.detail)
 st.caption(
     f"**How to read it.** The score runs −1 to +1. It is built only from the 25-delta "

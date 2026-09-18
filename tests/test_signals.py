@@ -13,6 +13,7 @@ from fxvol.signals import (
     percentile_set,
     position_size_lots,
     regime,
+    skew_headline,
     stop_verdict,
     term_structure_note,
 )
@@ -129,3 +130,42 @@ def test_percentile_source_still_excel_at_59_rows(row):
 def test_local_window_is_respected(row):
     pset = percentile_set(synthetic_history(200), row, 90)
     assert "90-row window" in pset.source
+
+
+def test_skew_headline_names_the_side_that_is_bid():
+    bearish = skew_headline("EURUSD", -0.2125, directional_lean(-0.5, 0.2, -0.20))
+    assert bearish.quote_side == "EUR puts over calls"
+    assert "bearish EUR against USD" in bearish.bias
+    assert bearish.tone == "red"
+
+    bullish = skew_headline("EURUSD", 0.2125, directional_lean(0.5, 0.8, 0.20))
+    assert bullish.quote_side == "EUR calls over puts"
+    assert "bullish EUR against USD" in bullish.bias
+    assert bullish.tone == "green"
+
+
+def test_skew_headline_uses_the_pair_currencies():
+    headline = skew_headline("USDJPY", -0.30, directional_lean(-0.5, 0.2, -0.20))
+    assert headline.quote_side == "USD puts over calls"
+    assert "USD against JPY" in headline.bias
+
+
+def test_skew_headline_strength_tiers():
+    mild = skew_headline("EURUSD", 0.2, directional_lean(0.4, 0.7, 0.10))
+    strong = skew_headline("EURUSD", 0.2, directional_lean(2.0, 0.99, 0.50))
+    assert "mildly bullish" in mild.bias
+    assert "strongly bullish" in strong.bias
+
+
+def test_skew_headline_neutral_and_missing():
+    flat = skew_headline("EURUSD", 0.0, directional_lean(0.0, 0.5, 0.0))
+    assert flat.quote_side == "No skew quoted"
+    assert "No directional lean" in flat.bias
+    assert flat.tone == "gray"
+
+
+def test_skew_headline_on_the_sample(row):
+    lean = directional_lean(float(row["rr_zscore"]), float(row["rr_pctile"]), float(row["rr_chg_5d"]))
+    headline = skew_headline("EURUSD", float(row["rr25_1m"]), lean)
+    assert headline.quote_side == "EUR puts over calls"
+    assert "bearish" in headline.bias

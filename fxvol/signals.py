@@ -76,6 +76,45 @@ def directional_lean(rr_zscore: float, rr_pctile: float, rr_chg_5d: float) -> Le
     return Lean(direction, score, detail)
 
 
+@dataclass(frozen=True)
+class Headline:
+    """Top-of-page skew read. `quote_side` is the vol-market phrasing,
+    `bias` the plain-language lean, `tone` a colour key."""
+
+    quote_side: str
+    bias: str
+    tone: str
+
+
+def skew_headline(pair: str, rr25_1m: float, lean: Lean) -> Headline:
+    """Which side of the option market is bid, and which way that leans.
+
+    `pair` is a Bloomberg root such as EURUSD; the first three letters are the
+    base currency. `rr25_1m` is in vol points, signed. Positioning, not a forecast.
+    """
+    base, quote = pair[:3].upper(), pair[3:6].upper()
+
+    if pd.isna(rr25_1m) or rr25_1m == 0:
+        quote_side = "No skew quoted"
+    elif rr25_1m > 0:
+        quote_side = f"{base} calls over puts"
+    else:
+        quote_side = f"{base} puts over calls"
+
+    score = lean.score
+    if pd.isna(score):
+        return Headline(quote_side, "No directional read available.", "gray")
+    if score > 0.45:
+        return Headline(quote_side, f"Skew leans strongly bullish {base} against {quote} today.", "green")
+    if score > 0.20:
+        return Headline(quote_side, f"Skew leans mildly bullish {base} against {quote} today.", "green")
+    if score < -0.45:
+        return Headline(quote_side, f"Skew leans strongly bearish {base} against {quote} today.", "red")
+    if score < -0.20:
+        return Headline(quote_side, f"Skew leans mildly bearish {base} against {quote} today.", "red")
+    return Headline(quote_side, f"No directional lean in {base} today — skew is balanced.", "gray")
+
+
 def position_size_lots(risk_per_trade: float, stop_pips: float, pip_value_per_lot: float) -> float:
     """Lots, from account-currency risk, stop in pips, pip value per lot."""
     if stop_pips <= 0 or pip_value_per_lot <= 0:
