@@ -5,3 +5,5 @@ data/store/
 !data/store/.gitkeep
 data/incoming/*.csv
 !data/incoming/.gitkeep
+
+data/chain.csv

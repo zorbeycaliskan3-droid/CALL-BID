@@ -73,6 +73,70 @@ def parse_snapshot(path: Path | str) -> pd.DataFrame:
     return frame[COLUMNS]
 
 
+CHAIN_NUMERIC: list[str] = ["strike", "open_interest", "iv", "days_to_expiry"]
+
+
+def parse_chain(path: Path | str) -> pd.DataFrame:
+    """Parse an option-chain export for the gamma exposure view.
+
+    Same dialect sniffing as `parse_snapshot`. Required columns: strike,
+    option_type ('C'/'P' or 'Call'/'Put'), open_interest, iv (percent points)
+    and either days_to_expiry or expiry (a date, converted to calendar days).
+    Rows missing a strike or open interest are dropped.
+    """
+    path = Path(path)
+    lines = _read_text(path)
+
+    header_idx = delimiter = None
+    for i, line in enumerate(lines):
+        for candidate in (";", ",", "\t", "|"):
+            fields = [f.strip().strip('"').lower() for f in line.split(candidate)]
+            if "strike" in fields and len(fields) > 2:
+                header_idx, delimiter = i, candidate
+                break
+        if header_idx is not None:
+            break
+    if header_idx is None:
+        raise ValueError("no header row containing 'strike' found")
+
+    decimal = "," if delimiter != "," else "."
+    header = [f.strip().strip('"').lower() for f in lines[header_idx].split(delimiter)]
+
+    rows: list[dict[str, object]] = []
+    for line in lines[header_idx + 1:]:
+        if not line.strip(delimiter).strip():
+            continue
+        fields = [f.strip().strip('"') for f in line.split(delimiter)]
+        record: dict[str, object] = {}
+        for name, value in zip(header, fields):
+            if name in CHAIN_NUMERIC:
+                record[name] = _to_float(value, decimal)
+            elif name in ("option_type", "type", "expiry"):
+                record["option_type" if name in ("option_type", "type") else name] = value
+        if record.get("strike") is None or pd.isna(record.get("strike", float("nan"))):
+            continue
+        rows.append(record)
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        raise ValueError("chain contains no rows with a numeric strike")
+
+    if "days_to_expiry" not in frame.columns:
+        if "expiry" not in frame.columns:
+            raise ValueError("chain needs either days_to_expiry or expiry")
+        expiry = pd.to_datetime(frame["expiry"], errors="coerce", dayfirst=False)
+        frame["days_to_expiry"] = (expiry - pd.Timestamp.today().normalize()).dt.days.astype("float64")
+
+    for column in CHAIN_NUMERIC:
+        if column not in frame.columns:
+            raise ValueError(f"chain is missing required column '{column}'")
+
+    frame["option_type"] = frame["option_type"].astype(str).str.upper().str[0]
+    frame = frame[frame["option_type"].isin(["C", "P"])]
+    frame = frame.dropna(subset=["strike", "open_interest", "iv", "days_to_expiry"])
+    return frame.reset_index(drop=True)
+
+
 def dedupe(frame: pd.DataFrame) -> pd.DataFrame:
     """One row per (date, pair), last occurrence wins, sorted by date."""
     if frame.empty:

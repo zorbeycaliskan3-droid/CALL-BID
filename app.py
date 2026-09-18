@@ -7,7 +7,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from fxvol.config import TENORS, Paths, pip_size_for, price_decimals
-from fxvol.io import load_store, parse_snapshot, rebuild_store
+from fxvol.gamma import gamma_exposure, key_levels, top_levels
+from fxvol.io import load_store, parse_chain, parse_snapshot, rebuild_store
 from fxvol.signals import (
     directional_lean,
     follow_through,
@@ -273,6 +274,88 @@ else:
         "to snapping back; a line travelling *away* from an extreme is positioning "
         "unwinding, which is the more tradeable of the two."
     )
+
+st.subheader("Gamma exposure")
+chain_file = st.file_uploader(
+    "Option chain (strike, option_type, open_interest, iv, days_to_expiry or expiry)",
+    type="csv",
+    key="chain",
+)
+if chain_file is None:
+    st.info(
+        "No option chain loaded. The volatility snapshot has no strike dimension, so "
+        "gamma exposure needs a separate chain export — one row per strike per side, "
+        "with open interest and implied vol. A sample is in `data/sample/`."
+    )
+else:
+    chain_path = paths.root / "data" / "chain.csv"
+    chain_path.write_bytes(chain_file.getvalue())
+    try:
+        chain = parse_chain(chain_path)
+    except ValueError as error:
+        st.error(f"{chain_file.name}: {error}")
+        chain = None
+
+    if chain is not None and not chain.empty:
+        g1, g2 = st.columns([1, 1])
+        gex_spot = g1.number_input(
+            "Underlying price for the gamma calculation",
+            value=float(chain["strike"].median()),
+            min_value=0.0001,
+            format="%.4f",
+            key="gex_spot",
+        )
+        contract_size = g2.number_input(
+            "Contract multiplier", value=100, min_value=1, step=1, key="contract_size"
+        )
+
+        profile = gamma_exposure(chain, gex_spot, int(contract_size))
+        levels = key_levels(profile, gex_spot)
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Call wall (resistance)", f"{levels.call_wall:,.2f}")
+        k2.metric("Put wall (support)", f"{levels.put_wall:,.2f}")
+        k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.2f}")
+        k4.metric("Net gamma", f"{levels.total_gex / 1e6:,.0f}M")
+        (st.success if levels.total_gex > 0 else st.warning)(f"**{levels.regime}.** {levels.note}")
+
+        colors = ["#2f6fdb" if v >= 0 else "#c0392b" for v in profile["total_gex"]]
+        gex_fig = go.Figure(
+            go.Bar(x=profile["strike"], y=profile["total_gex"], marker_color=colors, name="Total gamma")
+        )
+        gex_fig.add_vline(x=gex_spot, line_color="#111", line_width=2, annotation_text="Spot")
+        gex_fig.add_vline(x=levels.call_wall, line_color="#1b7f3b", line_dash="dash", annotation_text="Call wall")
+        gex_fig.add_vline(x=levels.put_wall, line_color="#b3261e", line_dash="dash", annotation_text="Put wall")
+        if not pd.isna(levels.flip_point):
+            gex_fig.add_vline(
+                x=levels.flip_point, line_color="#b26a00", line_dash="dot", annotation_text="Flip"
+            )
+        gex_fig.update_layout(
+            height=460,
+            margin=dict(t=30, b=10),
+            xaxis_title="Strike price",
+            yaxis_title="Total gamma (per 1% move)",
+            bargap=0.15,
+        )
+        st.plotly_chart(gex_fig, use_container_width=True)
+        st.caption(
+            "**What this shows.** Dealer gamma at each strike, calls positive and puts "
+            "negative. Tall blue bars are strikes where dealers must sell into strength "
+            "to stay hedged — they act as **resistance** and tend to pin price. Deep red "
+            "bars are strikes where hedging sells into weakness, so they act as "
+            "**support** until they break, and break hard. The dotted line is the gamma "
+            "flip: above it dealer hedging damps volatility, below it hedging amplifies "
+            "it. Levels are only as good as the open interest behind them, so they move "
+            "as positioning rolls and decay sharply after a big expiry."
+        )
+
+        st.dataframe(
+            top_levels(profile, 5).assign(
+                **{"total_gex": lambda f: (f["total_gex"] / 1e6).round(1)}
+            ).rename(columns={"strike": "Strike", "total_gex": "Gamma (M)", "role": "Role"}),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 st.subheader("Stored snapshots")
 st.dataframe(store, use_container_width=True)

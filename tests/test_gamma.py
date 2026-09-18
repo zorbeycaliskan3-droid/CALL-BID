@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from fxvol.gamma import (
+    black_scholes_gamma,
+    gamma_exposure,
+    gamma_flip,
+    key_levels,
+    top_levels,
+)
+from fxvol.io import parse_chain
+
+SAMPLE = Path(__file__).resolve().parents[1] / "data" / "sample" / "sample_option_chain.csv"
+
+
+def chain(rows: list[tuple[float, str, float, float, float]]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["strike", "option_type", "open_interest", "iv", "days_to_expiry"])
+
+
+def test_gamma_peaks_at_the_money():
+    atm = black_scholes_gamma(100.0, 100.0, 30 / 365, 20.0)
+    otm = black_scholes_gamma(100.0, 130.0, 30 / 365, 20.0)
+    assert atm > otm > 0
+
+
+def test_gamma_is_zero_at_expiry_and_zero_vol():
+    assert black_scholes_gamma(100.0, 100.0, 0.0, 20.0) == 0.0
+    assert black_scholes_gamma(100.0, 100.0, 30 / 365, 0.0) == 0.0
+
+
+def test_gamma_against_a_hand_checked_value():
+    # S=K=100, T=1y, sigma=20%, r=0: d1 = 0.1, gamma = phi(0.1)/(100*0.2)
+    expected = math.exp(-0.005) / math.sqrt(2 * math.pi) / 20.0
+    assert black_scholes_gamma(100.0, 100.0, 1.0, 20.0) == pytest.approx(expected, rel=1e-12)
+
+
+def test_calls_are_positive_and_puts_negative():
+    profile = gamma_exposure(chain([(100.0, "C", 1000, 20.0, 30), (90.0, "P", 1000, 20.0, 30)]), 100.0)
+    assert profile.loc[profile["strike"] == 100.0, "total_gex"].iloc[0] > 0
+    assert profile.loc[profile["strike"] == 90.0, "total_gex"].iloc[0] < 0
+
+
+def test_open_interest_scales_exposure_linearly():
+    one = gamma_exposure(chain([(100.0, "C", 1000, 20.0, 30)]), 100.0)["total_gex"].iloc[0]
+    ten = gamma_exposure(chain([(100.0, "C", 10000, 20.0, 30)]), 100.0)["total_gex"].iloc[0]
+    assert ten == pytest.approx(10 * one)
+
+
+def test_calls_and_puts_at_one_strike_net_off():
+    profile = gamma_exposure(chain([(100.0, "C", 1000, 20.0, 30), (100.0, "P", 1000, 20.0, 30)]), 100.0)
+    assert len(profile) == 1
+    assert profile["total_gex"].iloc[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_empty_chain_gives_empty_profile():
+    profile = gamma_exposure(chain([]), 100.0)
+    assert profile.empty
+    assert math.isnan(gamma_flip(profile))
+    assert key_levels(profile, 100.0).regime == "Unknown"
+
+
+def test_flip_point_is_interpolated_between_strikes():
+    profile = pd.DataFrame(
+        {"strike": [90.0, 100.0, 110.0], "total_gex": [-100.0, 50.0, 50.0], "cumulative_gex": [-100.0, -50.0, 0.0]}
+    )
+    flip = gamma_flip(profile)
+    assert 100.0 <= flip <= 110.0
+
+
+def test_flip_is_nan_without_a_crossing():
+    profile = pd.DataFrame(
+        {"strike": [90.0, 100.0], "total_gex": [10.0, 10.0], "cumulative_gex": [10.0, 20.0]}
+    )
+    assert math.isnan(gamma_flip(profile))
+
+
+def test_key_levels_find_the_walls():
+    profile = gamma_exposure(
+        chain(
+            [
+                (420.0, "C", 50000, 15.0, 30),
+                (430.0, "C", 1000, 16.0, 30),
+                (400.0, "P", 40000, 17.0, 30),
+                (390.0, "P", 500, 18.0, 30),
+            ]
+        ),
+        415.0,
+    )
+    levels = key_levels(profile, 415.0)
+    assert levels.call_wall == 420.0
+    assert levels.put_wall == 400.0
+
+
+def test_long_and_short_gamma_regimes():
+    long_gamma = gamma_exposure(chain([(100.0, "C", 10000, 20.0, 30)]), 100.0)
+    short_gamma = gamma_exposure(chain([(100.0, "P", 10000, 20.0, 30)]), 100.0)
+    assert key_levels(long_gamma, 100.0).regime == "Long gamma"
+    assert key_levels(short_gamma, 100.0).regime == "Short gamma"
+
+
+def test_top_levels_labels_support_and_resistance():
+    profile = gamma_exposure(
+        chain([(420.0, "C", 50000, 15.0, 30), (400.0, "P", 40000, 17.0, 30)]), 410.0
+    )
+    table = top_levels(profile, 5)
+    assert set(table["role"]) == {"Resistance", "Support"}
+    assert table.loc[table["role"] == "Resistance", "strike"].iloc[0] == 420.0
+    assert table.loc[table["role"] == "Support", "strike"].iloc[0] == 400.0
+
+
+def test_sample_chain_parses_with_turkish_decimals():
+    parsed = parse_chain(SAMPLE)
+    assert len(parsed) == 250
+    assert set(parsed["option_type"]) == {"C", "P"}
+    assert parsed["strike"].min() == pytest.approx(340.0)
+    assert parsed["iv"].between(10, 60).all()
+
+
+def test_chain_accepts_an_expiry_date_instead_of_days(tmp_path):
+    future = (pd.Timestamp.today().normalize() + pd.Timedelta(days=45)).strftime("%Y-%m-%d")
+    path = tmp_path / "chain.csv"
+    path.write_text(f"strike,option_type,open_interest,iv,expiry\n100,C,10,20,{future}\n", encoding="utf-8")
+    assert parse_chain(path)["days_to_expiry"].iloc[0] == pytest.approx(45.0)
+
+
+def test_chain_without_a_strike_column_raises(tmp_path):
+    path = tmp_path / "bad.csv"
+    path.write_text("a,b\n1,2\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        parse_chain(path)
