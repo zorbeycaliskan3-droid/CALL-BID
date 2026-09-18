@@ -8,6 +8,10 @@ NUMERIC_COLUMNS: list[str] = [
     "stop_0p7sig", "stop_1p0sig", "stop_1p5sig",
 ]
 
+# Added after the first release; absent from older exports and parsed as NaN.
+OPTIONAL_COLUMNS: list[str] = ["bid", "ask", "range_basis_price"]
+NUMERIC_COLUMNS += OPTIONAL_COLUMNS
+
 COLUMNS: list[str] = ["date", "pair"] + NUMERIC_COLUMNS
 TENORS: list[str] = ["iv_on", "iv_1w", "iv_1m", "iv_3m"]
 

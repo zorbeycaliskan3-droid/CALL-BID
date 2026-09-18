@@ -126,19 +126,35 @@ st.markdown(
 
 st.subheader("Today's range")
 snapshot_spot = float(row["spot"])
-current_spot = st.number_input(
-    "Current spot (range is centred here)",
-    value=snapshot_spot,
+basis = row.get("range_basis_price", float("nan"))
+basis_price = float(basis) if not pd.isna(basis) else snapshot_spot
+sides = {"Excel range basis": basis_price, "Mid": snapshot_spot}
+for label, column in (("Bid", "bid"), ("Ask", "ask")):
+    value = row.get(column, float("nan"))
+    if not pd.isna(value):
+        sides[label] = float(value)
+
+b1, b2 = st.columns([1, 1])
+side = b1.selectbox("Centre the range on", list(sides))
+current_spot = b2.number_input(
+    "Current spot (override)",
+    value=sides[side],
     min_value=0.0,
     step=float(pip_size) * 10,
     format=f"%.{decimals}f",
 )
+if "Bid" in sides and "Ask" in sides:
+    spread = (sides["Ask"] - sides["Bid"]) / pip_size
+    st.caption(
+        f"Snapshot bid {sides['Bid']:.{decimals}f} / ask {sides['Ask']:.{decimals}f}, "
+        f"spread {spread:.1f} pips."
+    )
 sigma_pips = sigma_daily_pips(current_spot, float(row["iv_on"]), pip_size)
 low, high = sigma_price_levels(current_spot, sigma_pips, pip_size)
 drift_pips = (current_spot - snapshot_spot) / pip_size
 st.caption(
-    f"Snapshot mid was {snapshot_spot:.{decimals}f}; current spot is "
-    f"{drift_pips:+.1f} pips from it. Levels below are built off current spot."
+    f"Snapshot mid was {snapshot_spot:.{decimals}f}; the range is centred "
+    f"{drift_pips:+.1f} pips from it. Every level below is built off that price."
 )
 r1, r2, r3 = st.columns(3)
 r1.metric("Expected absolute move", f"{expected_abs_move_pips(sigma_pips):.1f} pips")

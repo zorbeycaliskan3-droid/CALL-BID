@@ -110,3 +110,27 @@ def test_missing_header_raises(tmp_path):
     path.write_text("nothing;useful;here\n1;2;3\n", encoding="utf-8")
     with pytest.raises(ValueError):
         parse_snapshot(path)
+
+
+def test_bid_ask_columns_parse_when_present(tmp_path):
+    lines = SAMPLE.read_text(encoding="utf-8-sig").split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("date;"):
+            lines[i] = line.rstrip(";") + ";bid;ask;range_basis_price"
+        elif line.startswith("2026-09-17;"):
+            lines[i] = line + ";1,1535;1,1537;1,1535"
+    path = tmp_path / "bidask.csv"
+    path.write_text("\n".join(lines), encoding="utf-8-sig")
+
+    row = parse_snapshot(path).iloc[0]
+    assert row["spot"] == pytest.approx(1.1536)
+    assert row["bid"] == pytest.approx(1.1535)
+    assert row["ask"] == pytest.approx(1.1537)
+    assert row["range_basis_price"] == pytest.approx(1.1535)
+
+
+def test_older_exports_without_bid_ask_still_parse():
+    row = parse_snapshot(SAMPLE).iloc[0]
+    assert pd.isna(row["bid"])
+    assert pd.isna(row["ask"])
+    assert pd.isna(row["range_basis_price"])
