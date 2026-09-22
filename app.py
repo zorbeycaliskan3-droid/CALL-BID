@@ -139,10 +139,10 @@ with tab_gamma:
                 with st.expander("Adjust underlying price or multiplier", expanded=False):
                     g1, g2 = st.columns([1, 1])
                     gex_spot = g1.number_input(
-                        "Underlying price", value=spot_guess, min_value=0.0001, format="%.4f", key=f"gex_spot_{name}"
+                        "Underlying price", value=spot_guess, min_value=0.0001, format="%.4f", key=f"gex_spot_{name}_{spot_guess}"
                     )
                     contract_size = g2.number_input(
-                        "Contract multiplier", value=mult_guess, min_value=1, step=1, key=f"contract_size_{name}"
+                        "Contract multiplier", value=mult_guess, min_value=1, step=1, key=f"contract_size_{name}_{mult_guess}"
                     )
 
                 profile = gamma_exposure(group, gex_spot, int(contract_size))
