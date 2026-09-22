@@ -10,6 +10,7 @@ from fxvol.gamma import (
     black_scholes_gamma,
     gamma_exposure,
     gamma_flip,
+    net_gamma_at,
     key_levels,
     top_levels,
 )
@@ -60,23 +61,49 @@ def test_calls_and_puts_at_one_strike_net_off():
 def test_empty_chain_gives_empty_profile():
     profile = gamma_exposure(chain([]), 100.0)
     assert profile.empty
-    assert math.isnan(gamma_flip(profile))
+    assert math.isnan(gamma_flip(chain([]), 100.0))
     assert key_levels(profile, 100.0).regime == "Unknown"
 
 
-def test_flip_point_is_interpolated_between_strikes():
-    profile = pd.DataFrame(
-        {"strike": [90.0, 100.0, 110.0], "total_gex": [-100.0, 50.0, 50.0], "cumulative_gex": [-100.0, -50.0, 0.0]}
-    )
-    flip = gamma_flip(profile)
-    assert 100.0 <= flip <= 110.0
+def test_flip_is_where_net_gamma_changes_sign():
+    # Heavy puts below, heavy calls above: short gamma low, long gamma high.
+    book = chain([(90.0, "P", 50000, 20.0, 30), (110.0, "C", 50000, 20.0, 30)])
+    flip = gamma_flip(book, 100.0)
+    assert 90.0 < flip < 110.0
+    assert net_gamma_at(book, flip - 2) < 0 < net_gamma_at(book, flip + 2)
 
 
 def test_flip_is_nan_without_a_crossing():
-    profile = pd.DataFrame(
-        {"strike": [90.0, 100.0], "total_gex": [10.0, 10.0], "cumulative_gex": [10.0, 20.0]}
+    calls_only = chain([(100.0, "C", 10000, 20.0, 30)])
+    assert math.isnan(gamma_flip(calls_only, 100.0))
+
+
+def test_flip_picks_the_crossing_nearest_spot():
+    book = chain(
+        [
+            (80.0, "P", 50000, 20.0, 30),
+            (95.0, "C", 50000, 20.0, 30),
+            (105.0, "P", 50000, 20.0, 30),
+            (120.0, "C", 50000, 20.0, 30),
+        ]
     )
-    assert math.isnan(gamma_flip(profile))
+    flip = gamma_flip(book, 100.0, width=0.3)
+    assert abs(flip - 100.0) < 12
+
+
+def test_regime_and_flip_never_contradict():
+    book = chain([(90.0, "P", 30000, 20.0, 30), (110.0, "C", 60000, 20.0, 30)])
+    for spot in (95.0, 100.0, 105.0):
+        profile = gamma_exposure(book, spot)
+        levels = key_levels(profile, spot, book)
+        if pd.isna(levels.flip_point):
+            continue
+        if levels.regime == "Long gamma":
+            assert "stay long gamma unless" in levels.note
+        if levels.regime == "Short gamma":
+            assert "stay short gamma until" in levels.note
+        just_past = levels.flip_point + (1 if levels.flip_point > spot else -1)
+        assert (net_gamma_at(book, just_past) > 0) != (levels.regime == "Long gamma")
 
 
 def test_key_levels_find_the_walls():
@@ -234,3 +261,12 @@ def test_multi_export_still_yields_one_snapshot_row():
     frame = parse_snapshot(MULTI)
     assert len(frame) == 1
     assert frame.iloc[0]["pair"] == "EURUSD"
+
+
+def test_vectorised_net_gamma_matches_the_per_strike_profile():
+    parsed = parse_chain(MULTI)
+    for name, group in parsed.groupby("underlying"):
+        spot = float(group["underlying_price"].iloc[0])
+        mult = int(group["multiplier"].iloc[0])
+        expected = gamma_exposure(group, spot, mult)["total_gex"].sum()
+        assert net_gamma_at(group, spot, mult) == pytest.approx(expected, rel=1e-9)

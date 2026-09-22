@@ -90,38 +90,87 @@ class Levels:
     note: str
 
 
-def gamma_flip(profile: pd.DataFrame) -> float:
-    """Strike where cumulative dealer gamma crosses zero, interpolated.
+def _net_gamma_curve(
+    chain: pd.DataFrame, prices: np.ndarray, contract_size: int, rate: float = 0.0
+) -> np.ndarray:
+    """Net dealer gamma at each hypothetical price, all at once.
 
-    Below it dealers are short gamma and hedging amplifies moves; above it they
-    are long gamma and hedging damps moves. NaN when there is no crossing.
+    Same arithmetic as `gamma_exposure` summed over strikes, as a prices x
+    contracts matrix so a full sweep costs one numpy pass instead of hundreds
+    of groupbys.
     """
-    if profile.empty or len(profile) < 2:
+    strike = chain["strike"].to_numpy(dtype=float)
+    years = chain["days_to_expiry"].to_numpy(dtype=float) / DAYS_PER_YEAR
+    sigma = chain["iv"].to_numpy(dtype=float) / 100.0
+    oi = chain["open_interest"].to_numpy(dtype=float)
+    sign = np.where(chain["option_type"].astype(str).str.upper().str[0].to_numpy() == "C", 1.0, -1.0)
+    valid = (years > 0) & (sigma > 0) & (strike > 0)
+
+    s = np.asarray(prices, dtype=float)[:, None]
+    vol_time = sigma * np.sqrt(years)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d1 = (np.log(s / strike) + (rate + 0.5 * sigma**2) * years) / vol_time
+        gamma = np.exp(-0.5 * d1**2) / (np.sqrt(2.0 * np.pi) * s * vol_time)
+    gamma = np.where(valid & np.isfinite(gamma), gamma, 0.0)
+    exposure = gamma * oi * contract_size * s * s * 0.01 * sign
+    return exposure.sum(axis=1)
+
+
+def net_gamma_at(chain: pd.DataFrame, price: float, contract_size: int = CONTRACT_SIZE) -> float:
+    """Total dealer gamma if the underlying traded at `price`, per 1% move."""
+    if chain.empty:
+        return 0.0
+    return float(_net_gamma_curve(chain, np.array([price]), contract_size)[0])
+
+
+def gamma_flip(
+    chain: pd.DataFrame,
+    spot: float,
+    contract_size: int = CONTRACT_SIZE,
+    width: float = 0.15,
+    steps: int = 301,
+) -> float:
+    """The zero-gamma level: the price where total dealer gamma changes sign.
+
+    Re-prices the whole chain at hypothetical underlying prices within
+    ±`width` of spot and finds where net gamma crosses zero. When there is
+    more than one crossing the one nearest spot is returned, since that is the
+    level price would actually have to cross. NaN when net gamma keeps one sign.
+    """
+    if chain.empty or spot <= 0:
         return float("nan")
 
-    cumulative = profile["cumulative_gex"].to_numpy(dtype=float)
-    strikes = profile["strike"].to_numpy(dtype=float)
-    signs = np.sign(cumulative)
-    crossings = np.where(np.diff(signs) != 0)[0]
+    grid = np.linspace(spot * (1 - width), spot * (1 + width), steps)
+    values = _net_gamma_curve(chain, grid, contract_size)
+    crossings = np.where(np.diff(np.sign(values)) != 0)[0]
     if crossings.size == 0:
         return float("nan")
 
-    i = int(crossings[-1])
-    lo, hi = cumulative[i], cumulative[i + 1]
-    if hi == lo:
-        return float(strikes[i])
-    weight = -lo / (hi - lo)
-    return float(strikes[i] + weight * (strikes[i + 1] - strikes[i]))
+    levels = []
+    for i in crossings:
+        lo, hi = values[i], values[i + 1]
+        weight = 0.0 if hi == lo else -lo / (hi - lo)
+        levels.append(float(grid[i] + weight * (grid[i + 1] - grid[i])))
+    return min(levels, key=lambda level: abs(level - spot))
 
 
-def key_levels(profile: pd.DataFrame, spot: float) -> Levels:
-    """The call wall (resistance), put wall (support) and gamma flip."""
+def key_levels(
+    profile: pd.DataFrame,
+    spot: float,
+    chain: pd.DataFrame | None = None,
+    contract_size: int = CONTRACT_SIZE,
+) -> Levels:
+    """The call wall (resistance), put wall (support) and gamma flip.
+
+    The flip needs the raw `chain` to re-price at other underlying prices;
+    without it the flip is reported as NaN.
+    """
     if profile.empty:
         return Levels(float("nan"), float("nan"), float("nan"), 0.0, "Unknown", "No chain loaded.")
 
     call_wall = float(profile.loc[profile["total_gex"].idxmax(), "strike"])
     put_wall = float(profile.loc[profile["total_gex"].idxmin(), "strike"])
-    flip = gamma_flip(profile)
+    flip = gamma_flip(chain, spot, contract_size) if chain is not None else float("nan")
     total = float(profile["total_gex"].sum())
 
     if total == 0:
@@ -140,10 +189,17 @@ def key_levels(profile: pd.DataFrame, spot: float) -> Levels:
             "which amplifies moves. Breakouts run further and stops need more room."
         )
 
-    if not math.isnan(flip):
-        side = "above" if spot > flip else "below"
+    if not math.isnan(flip) and total != 0:
         places = 4 if flip < 10 else 2
-        note += f" Spot is {side} the flip at {flip:,.{places}f}."
+        move = "rises above" if flip > spot else "falls below"
+        other = "short" if total > 0 else "long"
+        keeps = "stay long gamma unless" if total > 0 else "stay short gamma until"
+        note += (
+            f" The gamma flip is at {flip:,.{places}f}: dealers {keeps} price {move} it, "
+            f"where they turn {other} gamma."
+        )
+    elif total != 0:
+        note += " No gamma flip within 15% of spot, so this regime should hold for any normal move."
     return Levels(call_wall, put_wall, flip, total, regime, note)
 
 

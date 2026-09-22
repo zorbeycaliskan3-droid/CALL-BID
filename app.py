@@ -116,7 +116,7 @@ with tab_gamma:
         overview = []
         for name, group in groups.items():
             spot_guess, mult_guess = chain_defaults(group)
-            lv = key_levels(gamma_exposure(group, spot_guess, mult_guess), spot_guess)
+            lv = key_levels(gamma_exposure(group, spot_guess, mult_guess), spot_guess, group, mult_guess)
             d = 4 if spot_guess < 10 else 2
             overview.append(
                 {
@@ -145,7 +145,7 @@ with tab_gamma:
                     )
 
                 profile = gamma_exposure(group, gex_spot, int(contract_size))
-                levels = key_levels(profile, gex_spot)
+                levels = key_levels(profile, gex_spot, group, int(contract_size))
                 gd = 4 if gex_spot < 10 else 2
 
                 k1, k2, k3, k4 = st.columns(4)
@@ -183,8 +183,9 @@ with tab_gamma:
                     "to stay hedged — they act as **resistance** and tend to pin price. Deep red "
                     "bars are strikes where hedging sells into weakness, so they act as "
                     "**support** until they break, and break hard. The dotted line is the gamma "
-                    "flip: above it dealer hedging damps volatility, below it hedging amplifies "
-                    "it. Levels are only as good as the open interest behind them, so they move "
+                    "flip: the price where dealers switch between long gamma (hedging damps "
+                    "moves) and short gamma (hedging amplifies them). Levels are only as good as "
+                    "the open interest behind them, so they move "
                     "as positioning rolls and decay sharply after a big expiry."
                 )
                 st.dataframe(
