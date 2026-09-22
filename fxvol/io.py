@@ -74,6 +74,7 @@ def parse_snapshot(path: Path | str) -> pd.DataFrame:
 
 
 CHAIN_NUMERIC: list[str] = ["strike", "open_interest", "iv", "days_to_expiry"]
+CHAIN_OPTIONAL_NUMERIC: list[str] = ["underlying_price", "multiplier"]
 
 
 def has_chain_block(path: Path | str) -> bool:
@@ -96,7 +97,9 @@ def parse_chain(path: Path | str) -> pd.DataFrame:
     Same dialect sniffing as `parse_snapshot`. Required columns: strike,
     option_type ('C'/'P' or 'Call'/'Put'), open_interest, iv (percent points)
     and either days_to_expiry or expiry (a date, converted to calendar days).
-    Rows missing a strike or open interest are dropped.
+    Optional: underlying (a label, so one file can carry several chains),
+    underlying_price and multiplier. Without an underlying column every row
+    is labelled CHAIN. Rows missing a strike or open interest are dropped.
     """
     path = Path(path)
     lines = _read_text(path)
@@ -123,8 +126,10 @@ def parse_chain(path: Path | str) -> pd.DataFrame:
         fields = [f.strip().strip('"') for f in line.split(delimiter)]
         record: dict[str, object] = {}
         for name, value in zip(header, fields):
-            if name in CHAIN_NUMERIC:
+            if name in CHAIN_NUMERIC or name in CHAIN_OPTIONAL_NUMERIC:
                 record[name] = _to_float(value, decimal)
+            elif name == "underlying":
+                record[name] = value.upper()
             elif name in ("option_type", "type", "expiry"):
                 record["option_type" if name in ("option_type", "type") else name] = value
         if record.get("strike") is None or pd.isna(record.get("strike", float("nan"))):
@@ -145,6 +150,12 @@ def parse_chain(path: Path | str) -> pd.DataFrame:
         if column not in frame.columns:
             raise ValueError(f"chain is missing required column '{column}'")
 
+    if "underlying" not in frame.columns:
+        frame["underlying"] = "CHAIN"
+    frame["underlying"] = frame["underlying"].fillna("").replace("", "CHAIN")
+    for column in CHAIN_OPTIONAL_NUMERIC:
+        if column not in frame.columns:
+            frame[column] = float("nan")
     frame["option_type"] = frame["option_type"].astype(str).str.upper().str[0]
     frame = frame[frame["option_type"].isin(["C", "P"])]
     frame = frame.dropna(subset=["strike", "open_interest", "iv", "days_to_expiry"])

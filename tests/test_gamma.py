@@ -182,3 +182,55 @@ def test_gamma_on_a_futures_chain_with_a_large_multiplier():
     assert levels.call_wall == pytest.approx(1.165)
     assert levels.put_wall == pytest.approx(1.145)
     assert levels.call_wall > levels.put_wall
+
+
+MULTI = Path(__file__).resolve().parents[1] / "data" / "sample" / "combined_multi_sample.csv"
+
+
+def test_multi_chain_parses_all_five_underlyings():
+    parsed = parse_chain(MULTI)
+    assert list(parsed["underlying"].unique()) == ["EURUSD", "SPY", "NVDA", "META", "GOOG"]
+    assert parsed.groupby("underlying").size().eq(82).all()
+
+
+def test_multi_chain_carries_price_and_multiplier_per_underlying():
+    parsed = parse_chain(MULTI)
+    firsts = parsed.groupby("underlying", sort=False).first()
+    assert firsts.loc["EURUSD", "multiplier"] == 125000
+    assert firsts.loc["SPY", "multiplier"] == 100
+    assert firsts.loc["EURUSD", "underlying_price"] == pytest.approx(1.1540)
+    assert firsts.loc["META", "underlying_price"] == pytest.approx(755.0)
+
+
+@pytest.mark.parametrize(
+    "name, call_wall, put_wall",
+    [
+        ("EURUSD", 1.165, 1.145),
+        ("SPY", 670.0, 640.0),
+        ("NVDA", 185.0, 170.0),
+        ("META", 800.0, 720.0),
+        ("GOOG", 260.0, 240.0),
+    ],
+)
+def test_each_underlying_gets_its_own_walls(name, call_wall, put_wall):
+    parsed = parse_chain(MULTI)
+    group = parsed[parsed["underlying"] == name]
+    spot = float(group["underlying_price"].iloc[0])
+    mult = int(group["multiplier"].iloc[0])
+    levels = key_levels(gamma_exposure(group, spot, mult), spot)
+    assert levels.call_wall == pytest.approx(call_wall)
+    assert levels.put_wall == pytest.approx(put_wall)
+
+
+def test_chain_without_underlying_column_is_labelled_chain():
+    parsed = parse_chain(SAMPLE)
+    assert set(parsed["underlying"]) == {"CHAIN"}
+    assert parsed["underlying_price"].isna().all()
+
+
+def test_multi_export_still_yields_one_snapshot_row():
+    from fxvol.io import parse_snapshot
+
+    frame = parse_snapshot(MULTI)
+    assert len(frame) == 1
+    assert frame.iloc[0]["pair"] == "EURUSD"

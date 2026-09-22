@@ -142,7 +142,8 @@ def key_levels(profile: pd.DataFrame, spot: float) -> Levels:
 
     if not math.isnan(flip):
         side = "above" if spot > flip else "below"
-        note += f" Spot is {side} the flip at {flip:,.2f}."
+        places = 4 if flip < 10 else 2
+        note += f" Spot is {side} the flip at {flip:,.{places}f}."
     return Levels(call_wall, put_wall, flip, total, regime, note)
 
 

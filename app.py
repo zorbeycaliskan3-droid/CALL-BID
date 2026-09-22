@@ -58,7 +58,9 @@ if uploads:
                 st.sidebar.warning(f"{upload.name}: chain block unreadable — {error}")
             else:
                 (paths.root / "data" / "chain.csv").write_bytes(target.read_bytes())
-                st.sidebar.success(f"{upload.name}: chain block with {len(embedded):,} contracts")
+                per = embedded.groupby("underlying", sort=False).size()
+                listing = ", ".join(f"{name} {count}" for name, count in per.items())
+                st.sidebar.success(f"{upload.name}: chains — {listing}")
 
 store = rebuild_store(paths)
 if store.empty:
@@ -286,102 +288,129 @@ else:
 
 st.subheader("Gamma exposure")
 chain_file = st.file_uploader(
-    "Option chain (strike, option_type, open_interest, iv, days_to_expiry or expiry)",
+    "Option chain override (the combined export already carries it)",
     type="csv",
     key="chain",
 )
 chain_path = paths.root / "data" / "chain.csv"
-if chain_file is None and not chain_path.exists():
-    st.info(
-        "No option chain loaded. The volatility snapshot has no strike dimension, so "
-        "gamma exposure needs chain rows — one per strike per side, with open interest "
-        "and implied vol. The Export sheet now carries them beneath the snapshot, so a "
-        "combined CSV uploaded in the sidebar feeds this section automatically."
-    )
-else:
-    if chain_file is not None:
-        chain_path.write_bytes(chain_file.getvalue())
-    else:
-        st.caption("Using the chain block from the most recent snapshot upload.")
+if chain_file is not None:
+    chain_path.parent.mkdir(parents=True, exist_ok=True)
+    chain_path.write_bytes(chain_file.getvalue())
+
+chain = None
+if chain_path.exists():
     try:
         chain = parse_chain(chain_path)
     except ValueError as error:
         st.error(f"Chain: {error}")
-        chain = None
 
-    if chain is not None and not chain.empty:
-        chain_spot = row.get("chain_spot", float("nan"))
-        chain_mult = row.get("chain_multiplier", float("nan"))
-        default_spot = float(chain_spot) if not pd.isna(chain_spot) else float(chain["strike"].median())
-        default_mult = int(chain_mult) if not pd.isna(chain_mult) else 100
-        if not pd.isna(chain_spot):
+if chain is None or chain.empty:
+    st.info(
+        "No option chain loaded. Save the Export sheet as CSV and upload it in the "
+        "sidebar — it carries the snapshot and the chains for every underlying on the "
+        "Chain tab in one file."
+    )
+else:
+    def chain_defaults(group: pd.DataFrame) -> tuple[float, int]:
+        price = group["underlying_price"].dropna()
+        mult = group["multiplier"].dropna()
+        if not price.empty:
+            spot_guess = float(price.iloc[0])
+        elif not pd.isna(row.get("chain_spot", float("nan"))):
+            spot_guess = float(row["chain_spot"])
+        else:
+            spot_guess = float(group["strike"].median())
+        if not mult.empty:
+            mult_guess = int(mult.iloc[0])
+        elif not pd.isna(row.get("chain_multiplier", float("nan"))):
+            mult_guess = int(row["chain_multiplier"])
+        else:
+            mult_guess = 100
+        return spot_guess, mult_guess
+
+    groups = {name: g.reset_index(drop=True) for name, g in chain.groupby("underlying", sort=False)}
+
+    overview = []
+    for name, group in groups.items():
+        spot_guess, mult_guess = chain_defaults(group)
+        lv = key_levels(gamma_exposure(group, spot_guess, mult_guess), spot_guess)
+        d = 4 if spot_guess < 10 else 2
+        overview.append(
+            {
+                "Underlying": name,
+                "Price": f"{spot_guess:,.{d}f}",
+                "Put wall (support)": f"{lv.put_wall:,.{d}f}",
+                "Call wall (resistance)": f"{lv.call_wall:,.{d}f}",
+                "Gamma flip": "n/a" if pd.isna(lv.flip_point) else f"{lv.flip_point:,.{d}f}",
+                "Net gamma (M)": f"{lv.total_gex / 1e6:,.0f}",
+                "Regime": lv.regime,
+                "Contracts": len(group),
+            }
+        )
+    st.dataframe(pd.DataFrame(overview), use_container_width=True, hide_index=True)
+
+    for tab, (name, group) in zip(st.tabs(list(groups)), groups.items()):
+        with tab:
+            spot_guess, mult_guess = chain_defaults(group)
+            g1, g2 = st.columns([1, 1])
+            gex_spot = g1.number_input(
+                "Underlying price", value=spot_guess, min_value=0.0001, format="%.4f", key=f"gex_spot_{name}"
+            )
+            contract_size = g2.number_input(
+                "Contract multiplier", value=mult_guess, min_value=1, step=1, key=f"contract_size_{name}"
+            )
+
+            profile = gamma_exposure(group, gex_spot, int(contract_size))
+            levels = key_levels(profile, gex_spot)
+            gd = 4 if gex_spot < 10 else 2
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Call wall (resistance)", f"{levels.call_wall:,.{gd}f}")
+            k2.metric("Put wall (support)", f"{levels.put_wall:,.{gd}f}")
+            k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.{gd}f}")
+            k4.metric("Net gamma", f"{levels.total_gex / 1e6:,.0f}M")
+            (st.success if levels.total_gex > 0 else st.warning)(f"**{levels.regime}.** {levels.note}")
             st.caption(
-                f"Underlying price and multiplier came from the snapshot's chain_spot "
-                f"and chain_multiplier columns."
+                f"{name} · {len(group):,} contracts · {len(profile):,} strikes from "
+                f"{profile['strike'].min():,.{gd}f} to {profile['strike'].max():,.{gd}f}"
             )
 
-        g1, g2 = st.columns([1, 1])
-        gex_spot = g1.number_input(
-            "Underlying price for the gamma calculation",
-            value=default_spot,
-            min_value=0.0001,
-            format="%.4f",
-            key="gex_spot",
-        )
-        contract_size = g2.number_input(
-            "Contract multiplier", value=default_mult, min_value=1, step=1, key="contract_size"
-        )
-
-        profile = gamma_exposure(chain, gex_spot, int(contract_size))
-        levels = key_levels(profile, gex_spot)
-
-        gd = 4 if gex_spot < 10 else 2
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Call wall (resistance)", f"{levels.call_wall:,.{gd}f}")
-        k2.metric("Put wall (support)", f"{levels.put_wall:,.{gd}f}")
-        k3.metric("Gamma flip", "n/a" if pd.isna(levels.flip_point) else f"{levels.flip_point:,.{gd}f}")
-        k4.metric("Net gamma", f"{levels.total_gex / 1e6:,.0f}M")
-        (st.success if levels.total_gex > 0 else st.warning)(f"**{levels.regime}.** {levels.note}")
-        st.caption(f"Underlying {gex_spot:,.4f} · {len(chain):,} contracts · "
-                   f"{len(profile):,} strikes from {profile['strike'].min():,.{gd}f} to {profile['strike'].max():,.{gd}f}")
-
-        colors = ["#2f6fdb" if v >= 0 else "#c0392b" for v in profile["total_gex"]]
-        gex_fig = go.Figure(
-            go.Bar(x=profile["strike"], y=profile["total_gex"], marker_color=colors, name="Total gamma")
-        )
-        gex_fig.add_vline(x=gex_spot, line_color="#111", line_width=2, annotation_text="Spot")
-        gex_fig.add_vline(x=levels.call_wall, line_color="#1b7f3b", line_dash="dash", annotation_text="Call wall")
-        gex_fig.add_vline(x=levels.put_wall, line_color="#b3261e", line_dash="dash", annotation_text="Put wall")
-        if not pd.isna(levels.flip_point):
-            gex_fig.add_vline(
-                x=levels.flip_point, line_color="#b26a00", line_dash="dot", annotation_text="Flip"
+            colors = ["#2f6fdb" if v >= 0 else "#c0392b" for v in profile["total_gex"]]
+            gex_fig = go.Figure(
+                go.Bar(x=profile["strike"], y=profile["total_gex"], marker_color=colors, name="Total gamma")
             )
-        gex_fig.update_layout(
-            height=460,
-            margin=dict(t=30, b=10),
-            xaxis_title="Strike price",
-            yaxis_title="Total gamma (per 1% move)",
-            bargap=0.15,
-        )
-        st.plotly_chart(gex_fig, use_container_width=True)
-        st.caption(
-            "**What this shows.** Dealer gamma at each strike, calls positive and puts "
-            "negative. Tall blue bars are strikes where dealers must sell into strength "
-            "to stay hedged — they act as **resistance** and tend to pin price. Deep red "
-            "bars are strikes where hedging sells into weakness, so they act as "
-            "**support** until they break, and break hard. The dotted line is the gamma "
-            "flip: above it dealer hedging damps volatility, below it hedging amplifies "
-            "it. Levels are only as good as the open interest behind them, so they move "
-            "as positioning rolls and decay sharply after a big expiry."
-        )
-
-        st.dataframe(
-            top_levels(profile, 5).assign(
-                **{"total_gex": lambda f: (f["total_gex"] / 1e6).round(1)}
-            ).rename(columns={"strike": "Strike", "total_gex": "Gamma (M)", "role": "Role"}),
-            use_container_width=True,
-            hide_index=True,
-        )
+            gex_fig.add_vline(x=gex_spot, line_color="#888", line_width=2, annotation_text="Spot")
+            gex_fig.add_vline(x=levels.call_wall, line_color="#1b7f3b", line_dash="dash", annotation_text="Call wall")
+            gex_fig.add_vline(x=levels.put_wall, line_color="#b3261e", line_dash="dash", annotation_text="Put wall")
+            if not pd.isna(levels.flip_point):
+                gex_fig.add_vline(x=levels.flip_point, line_color="#b26a00", line_dash="dot", annotation_text="Flip")
+            gex_fig.update_layout(
+                title=f"{name} gamma exposure",
+                height=460,
+                margin=dict(t=50, b=10),
+                xaxis_title="Strike price",
+                yaxis_title="Total gamma (per 1% move)",
+                bargap=0.15,
+            )
+            st.plotly_chart(gex_fig, use_container_width=True, key=f"gex_fig_{name}")
+            st.caption(
+                "**What this shows.** Dealer gamma at each strike, calls positive and puts "
+                "negative. Tall blue bars are strikes where dealers must sell into strength "
+                "to stay hedged — they act as **resistance** and tend to pin price. Deep red "
+                "bars are strikes where hedging sells into weakness, so they act as "
+                "**support** until they break, and break hard. The dotted line is the gamma "
+                "flip: above it dealer hedging damps volatility, below it hedging amplifies "
+                "it. Levels are only as good as the open interest behind them, so they move "
+                "as positioning rolls and decay sharply after a big expiry."
+            )
+            st.dataframe(
+                top_levels(profile, 5)
+                .assign(total_gex=lambda f: (f["total_gex"] / 1e6).round(1))
+                .rename(columns={"strike": "Strike", "total_gex": "Gamma (M)", "role": "Role"}),
+                use_container_width=True,
+                hide_index=True,
+                key=f"gex_table_{name}",
+            )
 
 st.subheader("Stored snapshots")
 st.dataframe(store, use_container_width=True)
