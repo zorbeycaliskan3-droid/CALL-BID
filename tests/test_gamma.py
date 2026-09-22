@@ -11,6 +11,7 @@ from fxvol.gamma import (
     gamma_exposure,
     gamma_flip,
     net_gamma_at,
+    price_check,
     key_levels,
     top_levels,
 )
@@ -270,3 +271,15 @@ def test_vectorised_net_gamma_matches_the_per_strike_profile():
         mult = int(group["multiplier"].iloc[0])
         expected = gamma_exposure(group, spot, mult)["total_gex"].sum()
         assert net_gamma_at(group, spot, mult) == pytest.approx(expected, rel=1e-9)
+
+
+def test_price_check_flags_a_stale_price():
+    book = chain([(k, "C", 100, 30.0, 24) for k in range(675, 845, 5)])
+    assert price_check(book, 740.0) is None
+    warning = price_check(book, 665.75)
+    assert warning is not None
+    assert "665.75" in warning and "stale" in warning
+
+
+def test_price_check_is_quiet_on_an_empty_chain():
+    assert price_check(chain([]), 100.0) is None

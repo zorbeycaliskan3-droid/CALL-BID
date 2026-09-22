@@ -116,6 +116,27 @@ def _net_gamma_curve(
     return exposure.sum(axis=1)
 
 
+def price_check(chain: pd.DataFrame, price: float, tolerance: float = 0.05) -> str | None:
+    """Warn when `price` sits far from the centre of the chain's own strikes.
+
+    Bloomberg centres a chain pull on the live price, so the median strike is
+    an independent estimate of where the underlying trades. A gap beyond
+    `tolerance` (a fraction) usually means a stale or wrong price cell.
+    """
+    if chain.empty or price <= 0:
+        return None
+    centre = float(chain["strike"].median())
+    gap = price / centre - 1.0
+    if abs(gap) <= tolerance:
+        return None
+    return (
+        f"The price {price:,.2f} is {gap:+.1%} away from the centre of this chain's "
+        f"strikes ({centre:,.2f}). Bloomberg centres the chain on the live price, so "
+        f"the price cell is probably stale — check it on the Chain tab, or correct it "
+        f"under 'Adjust underlying price or multiplier' below."
+    )
+
+
 def net_gamma_at(chain: pd.DataFrame, price: float, contract_size: int = CONTRACT_SIZE) -> float:
     """Total dealer gamma if the underlying traded at `price`, per 1% move."""
     if chain.empty:
