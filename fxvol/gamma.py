@@ -117,23 +117,35 @@ def _net_gamma_curve(
 
 
 def price_check(chain: pd.DataFrame, price: float, tolerance: float = 0.05) -> str | None:
-    """Warn when `price` sits far from the centre of the chain's own strikes.
+    """Warn when `price` cannot be where this chain was built around.
 
-    Bloomberg centres a chain pull on the live price, so the median strike is
-    an independent estimate of where the underlying trades. A gap beyond
-    `tolerance` (a fraction) usually means a stale or wrong price cell.
+    Bloomberg centres a chain pull on the live price, so a wrong price cell
+    shows up as a price sitting outside the strikes actually listed. The
+    middle strike alone is a poor test: a name that has fallen a long way
+    keeps its old high strikes, which drags the median up without anything
+    being wrong. So this warns only when the price falls outside the middle
+    half of the strikes *and* is more than `tolerance` from the median.
     """
     if chain.empty or price <= 0:
         return None
-    centre = float(chain["strike"].median())
-    gap = price / centre - 1.0
-    if abs(gap) <= tolerance:
+
+    strikes = chain["strike"].dropna()
+    if strikes.empty:
         return None
+
+    centre = float(strikes.median())
+    low, high = float(strikes.quantile(0.25)), float(strikes.quantile(0.75))
+    gap = price / centre - 1.0
+    if low <= price <= high or abs(gap) <= tolerance:
+        return None
+
+    where = "below" if price < low else "above"
     return (
-        f"The price {price:,.2f} is {gap:+.1%} away from the centre of this chain's "
-        f"strikes ({centre:,.2f}). Bloomberg centres the chain on the live price, so "
-        f"the price cell is probably stale — check it on the Chain tab, or correct it "
-        f"under 'Adjust underlying price or multiplier' below."
+        f"The price {price:,.2f} sits {where} the middle half of this chain's strikes "
+        f"({low:,.2f} to {high:,.2f}, centred {centre:,.2f}) and is {gap:+.1%} from the "
+        f"centre. Bloomberg builds a chain around the live price, so the price cell may "
+        f"be stale — check it on the Chain tab, or correct it under 'Adjust underlying "
+        f"price or multiplier' below."
     )
 
 

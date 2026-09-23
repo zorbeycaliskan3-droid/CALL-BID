@@ -283,3 +283,17 @@ def test_price_check_flags_a_stale_price():
 
 def test_price_check_is_quiet_on_an_empty_chain():
     assert price_check(chain([]), 100.0) is None
+
+
+def test_price_check_tolerates_a_chain_skewed_by_old_high_strikes():
+    # NVO shape: price 39.40, strikes 25-65 because the name fell and kept its
+    # old upper strikes. The median sits at 42 but the price is legitimate.
+    strikes = [25 + i for i in range(0, 41)]
+    book = chain([(float(k), side, 100, 40.0, 24) for k in strikes for side in ("C", "P")])
+    assert price_check(book, 39.40) is None
+
+
+def test_price_check_still_catches_a_price_below_every_strike():
+    book = chain([(float(k), "C", 100, 30.0, 24) for k in range(675, 845, 5)])
+    assert price_check(book, 665.75) is not None
+    assert price_check(book, 400.0) is not None
