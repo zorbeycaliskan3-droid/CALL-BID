@@ -15,6 +15,9 @@ from fxvol.vol import (
     sigma_daily_pct,
     sigma_daily_pips,
     sigma_price_levels,
+    skewed_daily_range,
+    skewed_price_levels,
+    smile_vols,
     stop_ladder,
     term_structure,
     verify,
@@ -105,3 +108,43 @@ def test_term_structure_and_inversion(row):
 def test_upward_curve_is_not_inverted():
     flat = pd.Series({"iv_on": 4.0, "iv_1w": 4.5, "iv_1m": 5.0, "iv_3m": 5.5})
     assert is_inverted(flat) is False
+
+
+def test_smile_vols_reconstruct_the_wings():
+    # ATM 6.23, RR -0.2125 (puts bid), BF 0.1325
+    put_vol, call_vol = smile_vols(6.23, -0.2125, 0.1325)
+    assert put_vol == pytest.approx(6.23 + 0.1325 + 0.10625)
+    assert call_vol == pytest.approx(6.23 + 0.1325 - 0.10625)
+    assert call_vol - put_vol == pytest.approx(-0.2125)          # RR is the tilt
+    assert (put_vol + call_vol) / 2 == pytest.approx(6.23 + 0.1325)  # BF is the lift
+
+
+def test_negative_risk_reversal_widens_the_downside():
+    down, up = skewed_daily_range(1.1536, 6.23, -0.2125, 0.1325, 0.0001)
+    assert down > up
+    low, high = skewed_price_levels(1.1536, down, up, 0.0001)
+    assert low < 1.1536 < high
+    assert 1.1536 - low > high - 1.1536
+
+
+def test_positive_risk_reversal_widens_the_upside():
+    down, up = skewed_daily_range(1.1536, 6.23, +0.2125, 0.1325, 0.0001)
+    assert up > down
+
+
+def test_zero_skew_matches_the_symmetric_range():
+    plain = sigma_daily_pips(1.1536, 6.23, 0.0001)
+    down, up = skewed_daily_range(1.1536, 6.23, 0.0, 0.0, 0.0001)
+    assert down == pytest.approx(plain)
+    assert up == pytest.approx(plain)
+
+
+def test_butterfly_widens_both_sides():
+    flat_down, flat_up = skewed_daily_range(1.1536, 6.23, 0.0, 0.0, 0.0001)
+    bf_down, bf_up = skewed_daily_range(1.1536, 6.23, 0.0, 0.5, 0.0001)
+    assert bf_down > flat_down and bf_up > flat_up
+
+
+def test_skewed_range_never_goes_negative_on_an_extreme_quote():
+    down, up = skewed_daily_range(1.1536, 1.0, -8.0, 0.0, 0.0001)
+    assert down > 0 and up >= 0

@@ -34,6 +34,40 @@ def sigma_price_levels(spot: float, sigma_pips: float, pip_size: float) -> tuple
     return spot - move, spot + move
 
 
+def smile_vols(atm: float, rr25: float, bf25: float) -> tuple[float, float]:
+    """The 25-delta put and call vols implied by an ATM vol, risk reversal and butterfly.
+
+    The market quotes the smile as a level (ATM), a tilt (RR = call vol minus
+    put vol) and a curvature (BF). The standard reconstruction is
+    put = ATM + BF - RR/2 and call = ATM + BF + RR/2. All in percent points;
+    returns (put_vol, call_vol).
+    """
+    wing = atm + bf25
+    return wing - rr25 / 2.0, wing + rr25 / 2.0
+
+
+def skewed_daily_range(
+    spot: float, atm: float, rr25: float, bf25: float, pip_size: float
+) -> tuple[float, float]:
+    """Downside and upside 1-sigma distances in pips for one session.
+
+    The 25-delta put vol sizes the downside and the call vol the upside, so a
+    market paying up for downside gets a wider low side than high side.
+    Returns (down_pips, up_pips), both positive.
+    """
+    put_vol, call_vol = smile_vols(atm, rr25, bf25)
+    down = sigma_daily_pips(spot, max(put_vol, 0.0), pip_size)
+    up = sigma_daily_pips(spot, max(call_vol, 0.0), pip_size)
+    return down, up
+
+
+def skewed_price_levels(
+    spot: float, down_pips: float, up_pips: float, pip_size: float
+) -> tuple[float, float]:
+    """(low, high) price levels from separate downside and upside pip distances."""
+    return spot - down_pips * pip_size, spot + up_pips * pip_size
+
+
 @dataclass(frozen=True)
 class Recheck:
     """One Excel-vs-Python comparison. `field` names the CSV column."""

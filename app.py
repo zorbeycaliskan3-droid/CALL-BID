@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from fxvol.config import TENORS, Paths, pip_size_for, price_decimals
+from fxvol.config import SURFACE_TENORS, TENORS, Paths, pip_size_for, price_decimals
 from fxvol.gamma import gamma_exposure, key_levels, price_check, top_levels
 from fxvol.io import has_chain_block, load_store, parse_chain, parse_snapshot, rebuild_store
 from fxvol.signals import (
@@ -19,7 +19,15 @@ from fxvol.signals import (
     stop_verdict,
     term_structure_note,
 )
-from fxvol.vol import expected_abs_move_pips, sigma_daily_pips, sigma_price_levels, verify
+from fxvol.vol import (
+    expected_abs_move_pips,
+    sigma_daily_pips,
+    sigma_price_levels,
+    skewed_daily_range,
+    skewed_price_levels,
+    smile_vols,
+    verify,
+)
 
 st.set_page_config(page_title="FX Vol Regime", layout="wide")
 
@@ -327,10 +335,36 @@ with tab_fx:
         f"Snapshot mid was {snapshot_spot:.{decimals}f}; the range is centred "
         f"{drift_pips:+.1f} pips from it. Every level below is built off that price."
     )
+    rr_on = row.get("rr25_on", float("nan"))
+    bf_on = row.get("bf25_on", float("nan"))
+    skewed = not (pd.isna(rr_on) or pd.isna(bf_on))
+    if skewed:
+        down_pips, up_pips = skewed_daily_range(
+            current_spot, float(row["iv_on"]), float(rr_on), float(bf_on), pip_size
+        )
+        low, high = skewed_price_levels(current_spot, down_pips, up_pips, pip_size)
+        put_vol, call_vol = smile_vols(float(row["iv_on"]), float(rr_on), float(bf_on))
+
     r1, r2, r3 = st.columns(3)
     r1.metric("Expected absolute move", f"{expected_abs_move_pips(sigma_pips):.1f} pips")
-    r2.metric("1σ low", f"{low:.{decimals}f}")
-    r3.metric("1σ high", f"{high:.{decimals}f}")
+    if skewed:
+        r2.metric("1σ low", f"{low:.{decimals}f}", f"-{down_pips:.1f} pips", delta_color="off")
+        r3.metric("1σ high", f"{high:.{decimals}f}", f"+{up_pips:.1f} pips", delta_color="off")
+        wider = "downside" if down_pips > up_pips else "upside"
+        st.caption(
+            f"**Skew-adjusted range.** The overnight smile prices the 25-delta put at "
+            f"{put_vol:.2f} and the call at {call_vol:.2f} percent points (ATM "
+            f"{float(row['iv_on']):.2f}, RR {float(rr_on):+.3f}, BF {float(bf_on):.3f}), so the "
+            f"{wider} sigma is the wider of the two: {down_pips:.1f} pips down against "
+            f"{up_pips:.1f} up. A symmetric band would put both at {sigma_pips:.1f}."
+        )
+    else:
+        r2.metric("1σ low", f"{low:.{decimals}f}")
+        r3.metric("1σ high", f"{high:.{decimals}f}")
+        st.caption(
+            "Symmetric range from the ATM vol alone. Export the full surface "
+            "(rr25_on and bf25_on) to get a skew-adjusted band."
+        )
     st.table(
         pd.DataFrame(
             {
@@ -357,8 +391,31 @@ with tab_fx:
     st.subheader("Term structure")
     inverted, note = term_structure_note(row)
     (st.warning if inverted else st.success)(note)
-    fig = go.Figure(go.Scatter(x=TENORS, y=[float(row[t]) for t in TENORS], mode="lines+markers"))
-    fig.update_layout(height=300, margin=dict(t=10, b=10), yaxis_title="ATM vol (percent points)")
+    surface_atm = {
+        t.upper(): float(row[f"atm_{t}"])
+        for t in SURFACE_TENORS
+        if not pd.isna(row.get(f"atm_{t}", float("nan")))
+    }
+    fig = go.Figure()
+    if len(surface_atm) >= 4:
+        fig.add_scatter(x=list(surface_atm), y=list(surface_atm.values()),
+                        mode="lines+markers", name="ATM")
+        for wing, dash in (("rr25", "dash"), ("bf25", "dot")):
+            series = {
+                t.upper(): float(row[f"{wing}_{t}"])
+                for t in SURFACE_TENORS
+                if not pd.isna(row.get(f"{wing}_{t}", float("nan")))
+            }
+            if len(series) >= 4:
+                fig.add_scatter(x=list(series), y=list(series.values()), mode="lines+markers",
+                                name=wing.upper(), yaxis="y2", line=dict(dash=dash))
+        fig.update_layout(
+            yaxis2=dict(title="RR / BF (vol points)", overlaying="y", side="right", zeroline=True)
+        )
+    else:
+        fig.add_scatter(x=TENORS, y=[float(row[t]) for t in TENORS], mode="lines+markers", name="ATM")
+    fig.update_layout(height=340, margin=dict(t=10, b=10), yaxis_title="ATM vol (percent points)",
+                      legend=dict(orientation="h", y=1.12))
     st.plotly_chart(fig, use_container_width=True)
     curve = {t: float(row[t]) for t in TENORS}
     st.caption(

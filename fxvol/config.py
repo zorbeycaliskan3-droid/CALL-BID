@@ -9,9 +9,20 @@ NUMERIC_COLUMNS: list[str] = [
 ]
 
 # Added after the first release; absent from older exports and parsed as NaN.
+SURFACE_TENORS: list[str] = ["on", "1w", "2w", "1m", "2m", "3m", "6m", "1y"]
+SURFACE_MEASURES: list[str] = ["atm", "rr25", "bf25", "rr10", "bf10"]
+# rr25_1m and bf25_1m are already carried by the snapshot block, so the
+# surface block leaves them out rather than repeating the column name.
+SURFACE_COLUMNS: list[str] = [
+    f"{measure}_{tenor}"
+    for measure in SURFACE_MEASURES
+    for tenor in SURFACE_TENORS
+    if f"{measure}_{tenor}" not in NUMERIC_COLUMNS
+]
+
 OPTIONAL_COLUMNS: list[str] = [
     "bid", "ask", "range_basis_price", "chain_spot", "chain_multiplier",
-]
+] + SURFACE_COLUMNS
 NUMERIC_COLUMNS += OPTIONAL_COLUMNS
 
 COLUMNS: list[str] = ["date", "pair"] + NUMERIC_COLUMNS
