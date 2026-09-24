@@ -7,7 +7,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from fxvol.config import SURFACE_TENORS, TENORS, Paths, pip_size_for, price_decimals
-from fxvol.gamma import gamma_exposure, key_levels, price_check, top_levels
+from fxvol.gamma import (
+    coverage_check,
+    gamma_exposure,
+    key_levels,
+    price_check,
+    top_levels,
+    window_reach,
+)
 from fxvol.io import has_chain_block, load_store, parse_chain, parse_snapshot, rebuild_store
 from fxvol.signals import (
     directional_lean,
@@ -136,6 +143,9 @@ with tab_gamma:
                     "Net gamma (M)": f"{lv.total_gex / 1e6:,.0f}",
                     "Regime": lv.regime,
                     "Price check": "⚠ check" if price_check(group, spot_guess) else "ok",
+                    "Window": "{:.1f}% / {:.1f}%".format(
+                        *[v * 100 for v in window_reach(group, spot_guess)]
+                    ),
                     "Contracts": len(group),
                 }
             )
@@ -157,6 +167,9 @@ with tab_gamma:
                 stale = price_check(group, gex_spot)
                 if stale:
                     chart_slot.warning(stale)
+                narrow = coverage_check(group, gex_spot)
+                if narrow:
+                    chart_slot.warning(narrow)
                 levels = key_levels(profile, gex_spot, group, int(contract_size))
                 gd = 4 if gex_spot < 10 else 2
 

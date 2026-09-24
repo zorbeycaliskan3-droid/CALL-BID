@@ -8,10 +8,12 @@ import pytest
 
 from fxvol.gamma import (
     black_scholes_gamma,
+    coverage_check,
     gamma_exposure,
     gamma_flip,
     net_gamma_at,
     price_check,
+    window_reach,
     key_levels,
     top_levels,
 )
@@ -297,3 +299,34 @@ def test_price_check_still_catches_a_price_below_every_strike():
     book = chain([(float(k), "C", 100, 30.0, 24) for k in range(675, 845, 5)])
     assert price_check(book, 665.75) is not None
     assert price_check(book, 400.0) is not None
+
+
+def test_window_reach_measures_both_sides():
+    book = chain([(float(k), "C", 100, 20.0, 24) for k in range(90, 111)])
+    down, up = window_reach(book, 100.0)
+    assert down == pytest.approx(0.10)
+    assert up == pytest.approx(0.10)
+
+
+def test_coverage_check_flags_a_narrow_window():
+    # SPY's shape: 1-point strikes 749-788 around 767.81, barely 2.5% either side.
+    book = chain([(float(k), side, 100, 12.0, 22) for k in range(749, 789) for side in ("C", "P")])
+    warning = coverage_check(book, 767.81)
+    assert warning is not None
+    assert "Strikes each side" in warning
+
+
+def test_coverage_check_passes_a_wide_window():
+    book = chain([(float(k), side, 100, 12.0, 22) for k in range(700, 841, 5) for side in ("C", "P")])
+    assert coverage_check(book, 767.81) is None
+
+
+def test_coverage_check_flags_a_one_sided_window():
+    book = chain([(float(k), "C", 100, 20.0, 24) for k in range(100, 121)])
+    warning = coverage_check(book, 100.0)
+    assert warning is not None
+    assert "the downside falls" in warning
+
+
+def test_coverage_check_is_quiet_without_data():
+    assert coverage_check(chain([]), 100.0) is None

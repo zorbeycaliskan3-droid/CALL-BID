@@ -149,6 +149,47 @@ def price_check(chain: pd.DataFrame, price: float, tolerance: float = 0.05) -> s
     )
 
 
+def window_reach(chain: pd.DataFrame, price: float) -> tuple[float, float]:
+    """How far the chain's strikes reach below and above `price`, as fractions.
+
+    Returns (down, up), both positive, e.g. (0.031, 0.026) for a window
+    covering 3.1% below and 2.6% above.
+    """
+    if chain.empty or price <= 0:
+        return float("nan"), float("nan")
+    strikes = chain["strike"].dropna()
+    if strikes.empty:
+        return float("nan"), float("nan")
+    return max(0.0, 1.0 - float(strikes.min()) / price), max(0.0, float(strikes.max()) / price - 1.0)
+
+
+def coverage_check(chain: pd.DataFrame, price: float, minimum: float = 0.05) -> str | None:
+    """Warn when the strike window is too narrow to compare across days.
+
+    A pull centred on spot slides as price moves, so a narrow window measures a
+    different set of strikes each day and the regime can appear to flip when
+    nothing changed. `minimum` is the reach each side, as a fraction, below
+    which the window is called too narrow.
+    """
+    down, up = window_reach(chain, price)
+    if pd.isna(down) or pd.isna(up):
+        return None
+    if down >= minimum and up >= minimum:
+        return None
+
+    if down < minimum and up < minimum:
+        thin = "both sides fall"
+    else:
+        thin = "the downside falls" if down < minimum else "the upside falls"
+    return (
+        f"Narrow strike window: this chain only reaches {down:.1%} below and {up:.1%} above "
+        f"the price, and {thin} short of {minimum:.0%}. The pull is centred on spot, so "
+        f"the window slides as price moves and the gamma reading can flip between days purely "
+        f"because different strikes came into view. Raise 'Strikes each side' on the Chain tab "
+        f"and re-pull."
+    )
+
+
 def net_gamma_at(chain: pd.DataFrame, price: float, contract_size: int = CONTRACT_SIZE) -> float:
     """Total dealer gamma if the underlying traded at `price`, per 1% move."""
     if chain.empty:
