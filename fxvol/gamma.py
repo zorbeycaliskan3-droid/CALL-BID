@@ -277,6 +277,62 @@ def key_levels(
     return Levels(call_wall, put_wall, flip, total, regime, note)
 
 
+@dataclass(frozen=True)
+class Balance:
+    """Call side against put side for one chain.
+
+    Gamma figures are in notional per 1% move, calls positive and puts as a
+    positive magnitude. `tilt` runs -1 (all puts) to +1 (all calls).
+    """
+
+    call_gamma: float
+    put_gamma: float
+    call_oi: float
+    put_oi: float
+    tilt: float
+    oi_ratio: float
+    side: str
+    note: str
+
+
+def call_put_balance(
+    profile: pd.DataFrame, chain: pd.DataFrame | None = None
+) -> Balance:
+    """Which side of the book carries more weight, by gamma and by open interest."""
+    if profile.empty:
+        return Balance(0.0, 0.0, 0.0, 0.0, 0.0, float("nan"), "Unknown", "No chain loaded.")
+
+    call_gamma = float(profile["call_gex"].sum())
+    put_gamma = abs(float(profile["put_gex"].sum()))
+    total = call_gamma + put_gamma
+    tilt = 0.0 if total == 0 else (call_gamma - put_gamma) / total
+
+    call_oi = put_oi = float("nan")
+    if chain is not None and not chain.empty:
+        side = chain["option_type"].astype(str).str.upper().str[0]
+        call_oi = float(chain.loc[side == "C", "open_interest"].sum())
+        put_oi = float(chain.loc[side == "P", "open_interest"].sum())
+    ratio = call_oi / put_oi if put_oi and put_oi > 0 else float("nan")
+
+    if tilt > 0.20:
+        label = "Call side stronger"
+        note = (
+            "Call gamma outweighs put gamma. Under the usual dealer assumption that is the "
+            "stabilising side: hedging leans against rallies and the upside strikes pin."
+        )
+    elif tilt < -0.20:
+        label = "Put side stronger"
+        note = (
+            "Put gamma outweighs call gamma. That is the destabilising side: hedging sells "
+            "into weakness, so downside moves extend rather than get absorbed."
+        )
+    else:
+        label = "Balanced"
+        note = "Neither side dominates, so hedging pressure is roughly symmetric."
+
+    return Balance(call_gamma, put_gamma, call_oi, put_oi, tilt, ratio, label, note)
+
+
 def top_levels(profile: pd.DataFrame, n: int = 5) -> pd.DataFrame:
     """The n largest positive and n most negative strikes, labelled."""
     if profile.empty:

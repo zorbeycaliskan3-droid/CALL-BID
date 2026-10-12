@@ -8,6 +8,7 @@ import streamlit as st
 
 from fxvol.config import SURFACE_TENORS, TENORS, Paths, pip_size_for, price_decimals
 from fxvol.gamma import (
+    call_put_balance,
     coverage_check,
     gamma_exposure,
     key_levels,
@@ -220,6 +221,61 @@ with tab_gamma:
                     use_container_width=True,
                     hide_index=True,
                     key=f"gex_table_{name}",
+                )
+
+                st.markdown("**Call side vs put side**")
+                bal = call_put_balance(profile, group)
+                tone = (
+                    "#1b7f3b" if bal.tilt > 0.20 else "#b3261e" if bal.tilt < -0.20 else "#5f6368"
+                )
+                st.markdown(
+                    f"<div style='padding:12px 16px;border-radius:6px;border-left:6px solid {tone};"
+                    f"background:rgba(128,128,128,0.10)'>"
+                    f"<b style='font-size:1.15rem'>{bal.side}</b> &nbsp;·&nbsp; tilt {bal.tilt:+.2f}"
+                    f"<div style='opacity:0.8;margin-top:4px'>{bal.note}</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+                b1, b2, b3, b4 = st.columns(4)
+                b1.metric("Call gamma", f"{bal.call_gamma / 1e6:,.0f}M")
+                b2.metric("Put gamma", f"{bal.put_gamma / 1e6:,.0f}M")
+                b3.metric("Call OI", f"{bal.call_oi:,.0f}")
+                b4.metric(
+                    "Call / put OI",
+                    "n/a" if pd.isna(bal.oi_ratio) else f"{bal.oi_ratio:.2f}",
+                    f"{bal.put_oi:,.0f} puts",
+                    delta_color="off",
+                )
+
+                split = go.Figure()
+                split.add_bar(x=profile["strike"], y=profile["call_gex"], name="Calls",
+                              marker_color="#2f6fdb")
+                split.add_bar(x=profile["strike"], y=profile["put_gex"], name="Puts",
+                              marker_color="#c0392b")
+                split.add_vline(x=gex_spot, line_color="#888", line_width=2, annotation_text="Spot")
+                split.update_layout(
+                    title=f"{name} call and put gamma by strike",
+                    height=380,
+                    margin=dict(t=50, b=10),
+                    barmode="relative",
+                    xaxis_title="Strike price",
+                    yaxis_title="Gamma (per 1% move)",
+                    legend=dict(orientation="h", y=1.12),
+                    bargap=0.15,
+                )
+                st.plotly_chart(split, use_container_width=True, key=f"split_fig_{name}")
+                st.caption(
+                    f"**What this shows.** The same gamma split into its two halves: blue is call "
+                    f"gamma above the line, red is put gamma below it. The net chart above is these "
+                    f"two added together. Where blue dominates, hedging leans against rallies and "
+                    f"price gets pinned; where red dominates, hedging sells into weakness and moves "
+                    f"extend. Today the call side carries {bal.call_gamma / 1e6:,.0f}M against "
+                    f"{bal.put_gamma / 1e6:,.0f}M on the put side"
+                    + (
+                        f", with {bal.oi_ratio:.2f} calls open for every put."
+                        if not pd.isna(bal.oi_ratio)
+                        else "."
+                    )
                 )
 
         st.markdown("**All underlyings**")

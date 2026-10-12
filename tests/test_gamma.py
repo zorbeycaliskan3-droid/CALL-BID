@@ -8,6 +8,7 @@ import pytest
 
 from fxvol.gamma import (
     black_scholes_gamma,
+    call_put_balance,
     coverage_check,
     gamma_exposure,
     gamma_flip,
@@ -330,3 +331,57 @@ def test_coverage_check_flags_a_one_sided_window():
 
 def test_coverage_check_is_quiet_without_data():
     assert coverage_check(chain([]), 100.0) is None
+
+
+def test_balance_tilts_to_whichever_side_carries_more_gamma():
+    calls_heavy = chain([(100.0, "C", 50000, 20.0, 30), (95.0, "P", 5000, 20.0, 30)])
+    profile = gamma_exposure(calls_heavy, 100.0)
+    bal = call_put_balance(profile, calls_heavy)
+    assert bal.side == "Call side stronger"
+    assert bal.tilt > 0.20
+    assert bal.call_gamma > bal.put_gamma
+    assert bal.call_oi == 50000 and bal.put_oi == 5000
+    assert bal.oi_ratio == pytest.approx(10.0)
+
+
+def test_balance_tilts_to_puts():
+    puts_heavy = chain([(100.0, "C", 5000, 20.0, 30), (100.0, "P", 50000, 20.0, 30)])
+    bal = call_put_balance(gamma_exposure(puts_heavy, 100.0), puts_heavy)
+    assert bal.side == "Put side stronger"
+    assert bal.tilt < -0.20
+
+
+def test_balance_is_balanced_when_the_sides_match():
+    even = chain([(100.0, "C", 10000, 20.0, 30), (100.0, "P", 10000, 20.0, 30)])
+    bal = call_put_balance(gamma_exposure(even, 100.0), even)
+    assert bal.side == "Balanced"
+    assert bal.tilt == pytest.approx(0.0)
+    assert bal.oi_ratio == pytest.approx(1.0)
+
+
+def test_tilt_stays_within_minus_one_and_one():
+    only_calls = chain([(100.0, "C", 10000, 20.0, 30)])
+    only_puts = chain([(100.0, "P", 10000, 20.0, 30)])
+    assert call_put_balance(gamma_exposure(only_calls, 100.0), only_calls).tilt == pytest.approx(1.0)
+    assert call_put_balance(gamma_exposure(only_puts, 100.0), only_puts).tilt == pytest.approx(-1.0)
+
+
+def test_balance_gamma_halves_sum_to_the_net():
+    parsed = parse_chain(MULTI)
+    group = parsed[parsed["underlying"] == "SPY"]
+    spot = float(group["underlying_price"].iloc[0])
+    profile = gamma_exposure(group, spot, 100)
+    bal = call_put_balance(profile, group)
+    assert bal.call_gamma - bal.put_gamma == pytest.approx(profile["total_gex"].sum())
+
+
+def test_balance_without_a_chain_reports_no_open_interest():
+    book = chain([(100.0, "C", 10000, 20.0, 30)])
+    bal = call_put_balance(gamma_exposure(book, 100.0))
+    assert pd.isna(bal.call_oi) and pd.isna(bal.oi_ratio)
+    assert bal.side == "Call side stronger"
+
+
+def test_balance_on_an_empty_profile():
+    bal = call_put_balance(gamma_exposure(chain([]), 100.0))
+    assert bal.side == "Unknown"
