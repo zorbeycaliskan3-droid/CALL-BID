@@ -169,3 +169,43 @@ def test_skew_headline_on_the_sample(row):
     headline = skew_headline("EURUSD", float(row["rr25_1m"]), lean)
     assert headline.quote_side == "EUR puts over calls"
     assert "bearish" in headline.bias
+
+
+def test_lean_exposes_its_two_components():
+    lean = directional_lean(-0.52, 0.244, +0.2375)
+    assert lean.level < 0 < lean.change
+    assert lean.score == pytest.approx(0.35 * lean.level + 0.65 * lean.change)
+
+
+def test_headline_never_calls_a_conflict_strongly_anything():
+    # The live 2026-10-20 case: puts still bid, but unwinding fast.
+    lean = directional_lean(-0.52, 0.244, +0.2375)
+    headline = skew_headline("EURUSD", -0.48, lean)
+    assert lean.score > 0.45                      # the raw score looks emphatic
+    assert "strongly" not in headline.bias        # the wording must not be
+    assert "Positioning still leans bearish EUR" in headline.bias
+    assert "five-day move points bullish" in headline.bias
+    assert headline.quote_side == "EUR puts over calls"
+    assert headline.tone == "orange"
+
+
+def test_headline_conflict_the_other_way_round():
+    lean = directional_lean(+0.9, 0.85, -0.30)    # calls bid but being sold
+    headline = skew_headline("EURUSD", +0.40, lean)
+    assert "Positioning still leans bullish EUR" in headline.bias
+    assert "points bearish" in headline.bias
+    assert headline.tone == "orange"
+
+
+def test_headline_still_emphatic_when_level_and_change_agree():
+    lean = directional_lean(+1.5, 0.95, +0.30)
+    headline = skew_headline("EURUSD", +0.40, lean)
+    assert "strongly bullish" in headline.bias
+    assert headline.tone == "green"
+    assert headline.quote_side == "EUR calls over puts"
+
+
+def test_quote_side_always_follows_the_sign_of_the_risk_reversal():
+    for rr, expected in ((-0.48, "EUR puts over calls"), (+0.48, "EUR calls over puts")):
+        for lean in (directional_lean(-0.5, 0.2, +0.3), directional_lean(+0.5, 0.8, -0.3)):
+            assert skew_headline("EURUSD", rr, lean).quote_side == expected

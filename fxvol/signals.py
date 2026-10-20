@@ -44,9 +44,14 @@ def term_structure_note(row: pd.Series) -> tuple[bool, str]:
 
 @dataclass(frozen=True)
 class Lean:
+    """Positioning skew. `level` is where the skew sits, `change` how fast it
+    is moving, both -1 to +1; `score` is their weighted blend."""
+
     direction: str
     score: float
     detail: str
+    level: float = 0.0
+    change: float = 0.0
 
 
 def directional_lean(rr_zscore: float, rr_pctile: float, rr_chg_5d: float) -> Lean:
@@ -73,7 +78,7 @@ def directional_lean(rr_zscore: float, rr_pctile: float, rr_chg_5d: float) -> Le
         direction = "Neutral"
 
     detail = f"level {level:+.2f} weighted 0.35, 5d change {rr_chg_5d:+.3f} vol pts -> {change:+.2f} weighted 0.65"
-    return Lean(direction, score, detail)
+    return Lean(direction, score, detail, level, change)
 
 
 @dataclass(frozen=True)
@@ -104,6 +109,23 @@ def skew_headline(pair: str, rr25_1m: float, lean: Lean) -> Headline:
     score = lean.score
     if pd.isna(score):
         return Headline(quote_side, "No directional read available.", "gray")
+
+    # The level says where positioning sits; the change says which way it is
+    # going. When they disagree the net score alone reads as a false certainty,
+    # so say both out loud instead of calling it strongly anything.
+    conflict = lean.level * lean.change < 0
+    if conflict:
+        stance = "bearish" if lean.level < 0 else "bullish"
+        drift = "bullish" if lean.change > 0 else "bearish"
+        net = "bullish" if score > 0.20 else "bearish" if score < -0.20 else "neutral"
+        return Headline(
+            quote_side,
+            f"Positioning still leans {stance} {base}, but the skew is unwinding and the "
+            f"five-day move points {drift}. Net lean {net}, driven by the change rather "
+            f"than the level.",
+            "orange",
+        )
+
     if score > 0.45:
         return Headline(quote_side, f"Skew leans strongly bullish {base} against {quote} today.", "green")
     if score > 0.20:
