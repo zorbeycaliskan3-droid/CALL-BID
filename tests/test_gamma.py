@@ -9,6 +9,7 @@ import pytest
 from fxvol.gamma import (
     black_scholes_gamma,
     call_put_balance,
+    chain_quality,
     coverage_check,
     gamma_exposure,
     gamma_flip,
@@ -385,3 +386,28 @@ def test_balance_without_a_chain_reports_no_open_interest():
 def test_balance_on_an_empty_profile():
     bal = call_put_balance(gamma_exposure(chain([]), 100.0))
     assert bal.side == "Unknown"
+
+
+def test_chain_quality_flags_a_pull_that_did_not_finish():
+    # The 2026-10-22 export: one call and one put per underlying.
+    stub = chain([(7320.0, "C", 100, 12.0, 29), (7320.0, "P", 100, 12.0, 29)])
+    message = chain_quality(stub)
+    assert message is not None
+    assert "Only 1 strike" in message
+    assert "READY" in message
+
+
+def test_chain_quality_passes_a_full_chain():
+    full = chain([(float(k), side, 100, 12.0, 29) for k in range(700, 800, 5) for side in ("C", "P")])
+    assert chain_quality(full) is None
+
+
+def test_chain_quality_boundary_at_five_strikes():
+    four = chain([(float(k), "C", 100, 12.0, 29) for k in (700, 705, 710, 715)])
+    five = chain([(float(k), "C", 100, 12.0, 29) for k in (700, 705, 710, 715, 720)])
+    assert chain_quality(four) is not None
+    assert chain_quality(five) is None
+
+
+def test_chain_quality_reports_an_empty_chain():
+    assert chain_quality(chain([])) == "This chain is empty."

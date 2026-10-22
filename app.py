@@ -10,6 +10,7 @@ from fxvol.charts import iv_rv_chart, percentile_strip
 from fxvol.config import SURFACE_TENORS, TENORS, Paths, pip_size_for, price_decimals
 from fxvol.gamma import (
     call_put_balance,
+    chain_quality,
     coverage_check,
     gamma_exposure,
     key_levels,
@@ -128,10 +129,28 @@ with tab_gamma:
             return spot_guess, mult_guess
 
         groups = {name: g.reset_index(drop=True) for name, g in chain.groupby("underlying", sort=False)}
+        incomplete = [n for n, g in groups.items() if chain_quality(g)]
+        if len(incomplete) == len(groups):
+            st.error(
+                f"**No usable chain in this export.** All {len(groups)} underlyings came through with "
+                f"fewer than 5 strikes, so the Bloomberg pull had not finished when the workbook was "
+                f"saved. On the Chain tab, wait for the status cell to read READY, then save the "
+                f"Export sheet as CSV again and re-upload."
+            )
+        elif incomplete:
+            st.warning(f"Incomplete pull for: {', '.join(incomplete)}. Their tabs are blank below.")
 
         overview = []
         for name, group in groups.items():
             spot_guess, mult_guess = chain_defaults(group)
+            if chain_quality(group):
+                overview.append(
+                    {"Underlying": name, "Price": f"{spot_guess:,.2f}", "Put wall (support)": "—",
+                     "Call wall (resistance)": "—", "Gamma flip": "—", "Net gamma (M)": "—",
+                     "Regime": "incomplete pull", "Contracts": len(group),
+                     "Price check": "—", "Window": "—"}
+                )
+                continue
             lv = key_levels(gamma_exposure(group, spot_guess, mult_guess), spot_guess, group, mult_guess)
             d = 4 if spot_guess < 10 else 2
             overview.append(
@@ -153,6 +172,10 @@ with tab_gamma:
 
         for tab, (name, group) in zip(st.tabs(list(groups)), groups.items()):
             with tab:
+                sparse = chain_quality(group)
+                if sparse:
+                    st.error(f"**{name} chain incomplete.** {sparse}")
+                    continue
                 spot_guess, mult_guess = chain_defaults(group)
                 chart_slot = st.container()
                 with st.expander("Adjust underlying price or multiplier", expanded=False):

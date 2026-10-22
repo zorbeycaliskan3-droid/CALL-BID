@@ -149,6 +149,28 @@ def price_check(chain: pd.DataFrame, price: float, tolerance: float = 0.05) -> s
     )
 
 
+def chain_quality(chain: pd.DataFrame, minimum_strikes: int = 5) -> str | None:
+    """Warn when a chain holds too few strikes to say anything at all.
+
+    A Bloomberg pull populates asynchronously, so a workbook saved before it
+    finishes carries only the first ticker of each spill. One or two strikes
+    produce a chart, walls and a regime that are all meaningless, so the
+    caller should show this instead of any of them.
+    """
+    if chain.empty:
+        return "This chain is empty."
+    strikes = chain["strike"].dropna().nunique()
+    if strikes >= minimum_strikes:
+        return None
+    return (
+        f"Only {strikes} strike{'s' if strikes != 1 else ''} came through for this underlying "
+        f"({len(chain)} row{'s' if len(chain) != 1 else ''}), far too few for a gamma profile. "
+        f"Bloomberg fills a chain asynchronously, so this usually means the workbook was saved "
+        f"before the pull finished. Open the Chain tab, wait until the status cell reads READY, "
+        f"then save the Export sheet again."
+    )
+
+
 def window_reach(chain: pd.DataFrame, price: float) -> tuple[float, float]:
     """How far the chain's strikes reach below and above `price`, as fractions.
 
